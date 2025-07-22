@@ -1,0 +1,52 @@
+#### Eukaryotic Annotation Config ####
+# NOTE: If --assembly-file is not used, the pipeline will automatically search for assemblies from India.
+
+# Query for the organism in NCBI databases
+organism_query: "Saccharomyces cerevisiae[Organism]"
+
+# Email address for NCBI notifications
+email: "your@email.com"
+
+# Organism name
+organism: "Saccharomyces cerevisiae"
+
+reference_genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/146/045/GCF_000146045.2_R64/GCF_000146045.2_R64_genomic.fna.gz"
+gff_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/146/045/GCF_000146045.2_R64/GCF_000146045.2_R64_genomic.gff.gz"
+
+# NCBI taxonomic group
+group: "fungi"
+
+# Organism type: Set to EK for Eukaryotic
+organism_type: "EK"
+
+# QUAST parameters
+quast_threads: 16
+
+location: "India"
+
+#Parameteres for Prokaryotic Genome Annotation (Prokka)
+prokka_kingdom: "Bacteria"
+prokka_env: "assembly_tool_env"
+prokka_params:
+  cpus: 16
+
+# Parameters for the Eukaryotic (MAKER) pipeline
+maker_params:
+  # --- Input Evidence Files (User must provide absolute paths) ---
+  protein_evidence: "input/sp_protein.fasta"
+  est_evidence: "input/sp_est.fasta"
+
+  # --- MAKER Control Files (Provide absolute paths) ---
+  maker_opts_ctl: "maker_opts.ctl"
+  maker_bopts_ctl: "maker_bopts.ctl"
+  maker_exe_ctl: "maker_exe.ctl"
+
+  # --- Computational Resources ---
+  cpus: 16
+
+
+
+
+# Optional empty sections
+quast_params: {}
+prokka_params: {}
