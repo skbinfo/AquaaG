@@ -1,0 +1,55 @@
+#### Prokaryotic Annotation Config ####
+# NOTE: If --assembly-file is not used, the pipeline will automatically search for assemblies from India.
+
+# Query for the organism in NCBI databases
+organism_query: "Salmonella enterica[Organism]"
+
+# Email address for NCBI notifications
+email: "your@email.com"
+
+# Organism name
+organism: "Salmonella enterica"
+
+# URLs for reference data
+reference_genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/006/945/GCF_000006945.2_ASM694v2/GCF_000006945.2_ASM694v2_cds_from_genomic.fna.gz"
+gff_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/006/945/GCF_000006945.2_ASM694v2/GCF_000006945.2_ASM694v2_genomic.gff.gz"
+
+# NCBI taxonomic group
+group: "bacteria"
+
+# Organism type: Set to PK for Prokaryotic
+organism_type: "PK"
+
+# QUAST parameters
+quast_threads: 8
+
+# BUSCO parameters
+busco_lineage: "bacteria_odb10"
+busco_params:
+  cpu: 8
+
+location: "India"
+
+# Parameters for Prokaryotic Genome Annotation (Prokka)
+prokka_kingdom: "Bacteria"
+prokka_env: "assembly_tool_env"
+prokka_params:
+  cpus: 8
+
+# Parameters for the Eukaryotic (MAKER) pipeline
+maker_params:
+  # --- Input Evidence Files (User must provide absolute paths) ---
+  protein_evidence: "/home/lab202/assembly_tool/input/sp_protein.fasta"
+  est_evidence: "/home/lab202/assembly_tool/input/sp_est.fasta"
+
+  # --- MAKER Control Files (Provide absolute paths) ---
+  maker_opts_ctl: "/home/lab202/assembly_tool/maker_opts.ctl"
+  maker_bopts_ctl: "/home/lab202/assembly_tool/maker_bopts.ctl"
+  maker_exe_ctl: "/home/lab202/assembly_tool/maker_exe.ctl"
+
+  # --- Computational Resources ---
+  cpus: 8
+
+# Optional empty sections
+quast_params: {}
+prokka_params: {}
