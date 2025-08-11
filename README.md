@@ -34,7 +34,7 @@ AquaaG is a Python-based pipeline for downloading genomic assemblies from NCBI, 
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/AquaaG.git
+git clone https://github.com/skbinfo/AquaaG.git
 cd AquaaG
 
 ### 2. Create Conda Environment
@@ -206,8 +206,6 @@ The pipeline filters for India-specific assemblies using a predefined list of ke
 - **Tools and Libraries**: Gratitude to the developers of MAKER, Prokka, QUAST, BUSCO, RepeatModeler, RepeatMasker, pandas, BioPython, and other dependencies that power AquaaG.
 - **Community**: Inspired by the bioinformatics community’s open-source efforts to streamline genomic analysis.
 
-## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contributions
 Contributions are welcome! Submit pull requests for bug fixes or new features. For major changes, open an issue first.
