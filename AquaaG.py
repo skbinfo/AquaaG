@@ -43,7 +43,7 @@ def load_config(config_file):
         with open(config_file, 'r') as file:
             config = yaml.safe_load(file)
 
-        required_fields = ['organism_query', 'email', 'organism', 'reference_genome_url', 'gff_url', 'group', 'organism_type', 'quast_threads']
+        required_fields = ['organism_query', 'email', 'organism', 'reference_genome_url', 'gff_url', 'group', 'organism_type', 'quast_threads', 'busco_lineage']
         missing = [f for f in required_fields if f not in config]
         if missing:
             raise ValueError(f"Missing required fields in config: {', '.join(missing)}")
@@ -57,14 +57,14 @@ def load_config(config_file):
         if org_type == 'EK':
             if 'maker_params' not in config:
                 raise ValueError("Missing 'maker_params' section for EK pipeline.")
-            # maker_exe_ctl is no longer required from the user as it's auto-generated
-            required_maker_params = ['protein_evidence', 'est_evidence', 'maker_opts_ctl', 'maker_bopts_ctl', 'cpus']
+            required_maker_params = ['maker_opts_ctl', 'maker_bopts_ctl', 'cpus']
             missing_maker = [f for f in required_maker_params if f not in config.get('maker_params', {})]
             if missing_maker:
                 raise ValueError(f"Missing required fields in maker_params: {', '.join(missing_maker)}")
 
         config.setdefault('quast_params', {})
         config.setdefault('prokka_params', {})
+        config.setdefault('busco_params', {})
         return config
     except Exception as e:
         print(f"FATAL ERROR loading configuration file '{config_file}': {e}", file=sys.stderr)
@@ -115,19 +115,21 @@ def fetch_assembly_data(organism_query, logger):
     """Fetch assembly data from NCBI using Entrez."""
     command = f'esearch -db assembly -query "{organism_query}" | esummary | xtract -pattern DocumentSummary -element AssemblyAccession,AssemblyName,AssemblyStatus,SubmitterOrganization'
     logger.info(f"Fetching assembly data for '{organism_query}'")
-    result = subprocess.run(command, shell=True, text=True, capture_output=True, check=True)
-    
-    if not result.stdout.strip():
-        raise ValueError("No data returned from NCBI for the query.")
-        
-    data = [line.split("\t") for line in result.stdout.strip().split("\n")]
-    df = pd.DataFrame(data, columns=["AssemblyAccession", "AssemblyName", "AssemblyStatus", "SubmitterOrganization"])
-    logger.info(f"Fetched {len(df)} assembly records.")
-    return df
+    try:
+        result = subprocess.run(command, shell=True, text=True, capture_output=True, check=True)
+        if not result.stdout.strip():
+            logger.error("No data returned from NCBI for the query.")
+            return pd.DataFrame(columns=["AssemblyAccession", "AssemblyName", "AssemblyStatus", "SubmitterOrganization"])
+        data = [line.split("\t") for line in result.stdout.strip().split("\n")]
+        df = pd.DataFrame(data, columns=["AssemblyAccession", "AssemblyName", "AssemblyStatus", "SubmitterOrganization"])
+        logger.info(f"Fetched {len(df)} assembly records: {df['AssemblyAccession'].tolist()}")
+        return df
+    except subprocess.CalledProcessError as e:
+        logger.error(f"NCBI query failed: {e.stderr}")
+        return pd.DataFrame(columns=["AssemblyAccession", "AssemblyName", "AssemblyStatus", "SubmitterOrganization"])
 
 def filter_rows_by_cities(df, location, logger):
     """Filter rows by location without limiting the number of assemblies."""
-    # This function is retained for its specific India-related keywords
     indian_cities = [
         "IND", "Indian", "india", "India", "Agartala", "Ahmedabad", "Aizawl", "Ajmer", "Allahabad", "Amritsar",
         "Anand", "Avikanagar", "Aurangabad", "Amravati", "Bangalore", "Bareilly", "Batinda", "Belgavi", "Banglore", "Bengaluru",
@@ -147,23 +149,30 @@ def filter_rows_by_cities(df, location, logger):
     ]
     
     logger.info(f"Filtering {len(df)} assemblies for location: {location}")
+    if df.empty:
+        logger.warning("No assemblies to filter (empty DataFrame).")
+        return df
+    
     if location.lower() == "india":
         pattern = re.compile(r"\b(" + "|".join(map(re.escape, indian_cities)) + r")\b", re.IGNORECASE)
         filtered_df = df[df["SubmitterOrganization"].str.contains(pattern, na=False)]
     else:
-        # Fallback for other locations if ever needed, though default is India
         pattern = re.escape(location)
         filtered_df = df[df["SubmitterOrganization"].str.contains(pattern, case=False, na=False)]
     
-    logger.info(f"Found {len(filtered_df)} assemblies matching the location '{location}'.")
+    logger.info(f"Found {len(filtered_df)} assemblies matching the location '{location}': {filtered_df['AssemblyAccession'].tolist()}")
     if filtered_df.empty:
-        logger.warning("No assemblies matched the location filter.")
+        logger.warning(f"No assemblies matched the location filter. Available assemblies before filtering:\n{df[['AssemblyAccession', 'SubmitterOrganization']].to_string()}")
     return filtered_df
 
 def download_assemblies(filtered_df, output_dir, group, num_assemblies, logger):
     successful_accessions = []
     assembly_ids = filtered_df["AssemblyAccession"].tolist()
     total_to_download = len(assembly_ids) if num_assemblies is None else min(num_assemblies, len(assembly_ids))
+    if not assembly_ids:
+        logger.error("No assemblies available to download.")
+        return successful_accessions
+    
     with tqdm(total=total_to_download, desc="Downloading assemblies") as pbar:
         for accession in assembly_ids[:total_to_download]:
             source = "refseq" if accession.startswith("GCF") else "genbank"
@@ -172,35 +181,44 @@ def download_assemblies(filtered_df, output_dir, group, num_assemblies, logger):
                 run_command_logged(command, logger, error_message=f"Download failed for {accession}")
                 successful_accessions.append(accession)
                 pbar.update(1)
-            except SystemExit: logger.error(f"Skipping accession {accession} due to download failure.")
+            except SystemExit:
+                logger.error(f"Skipping accession {accession} due to download failure")
+                continue
     return successful_accessions
 
-def decompress_and_rename_assemblies(output_dir, successful_accessions, logger):
-    for accession in tqdm(successful_accessions, desc="Processing files"):
-        find_command = f"find {output_dir} -name '*{accession}*.fna.gz'"
-        result = subprocess.run(find_command, shell=True, check=True, capture_output=True, text=True)
-        gz_file = result.stdout.strip().split('\n')[0]
-        if gz_file:
-            run_command_logged(f"gunzip -f '{gz_file}'", logger)
-            fna_file = gz_file.removesuffix('.gz')
-            shutil.move(fna_file, os.path.join(output_dir, f"{accession}.fna"))
-    run_command_logged(f"find {output_dir} -mindepth 1 -type d -empty -delete", logger)
+def decompress_and_rename_assemblies(assembly_dir, accessions, logger):
+    """Decompress and rename downloaded assembly files."""
+    for accession in accessions:
+        pattern = os.path.join(assembly_dir, f"**/{accession}*.fna.gz")
+        files = glob.glob(pattern, recursive=True)
+        if not files:
+            logger.warning(f"No FASTA file found for {accession}")
+            continue
+        for file in files:
+            run_command_logged(f"gunzip -f {file}", logger, error_message=f"Failed to decompress {file}")
+            decompressed_file = file.removesuffix('.gz')
+            new_file = os.path.join(assembly_dir, f"{accession}.fna")
+            shutil.move(decompressed_file, new_file)
+            logger.info(f"Renamed {decompressed_file} to {new_file}")
 
-def run_quast(accessions, assembly_dir, quast_dir, ref_genome, ref_gff, threads, params, logger):
-    for accession in tqdm(accessions, desc="Running QUAST"):
-        cmd = f"quast.py '{os.path.join(assembly_dir, f'{accession}.fna')}' -r '{ref_genome}' -g '{ref_gff}' -o '{os.path.join(quast_dir, accession)}' --threads {threads} {format_params(params)}"
-        run_command_logged(cmd, logger, error_message=f"QUAST failed for {accession}")
+def run_quast(accessions, assembly_dir, quast_dir, ref_genome, gff_genome, threads, quast_params, logger):
+    """Run QUAST for quality assessment."""
+    assembly_files = [os.path.join(assembly_dir, f"{acc}.fna") for acc in accessions]
+    quast_cmd = f"quast.py {' '.join(assembly_files)} -r {ref_genome} -g {gff_genome} -t {threads} {format_params(quast_params)} -o {quast_dir}"
+    run_command_logged(quast_cmd, logger, error_message="QUAST failed.")
 
-def run_prokka(accessions, assembly_dir, prokka_dir, kingdom, params, logger):
-    for accession in tqdm(accessions, desc="Running Prokka"):
-        cmd = f"prokka --outdir '{os.path.join(prokka_dir, accession)}' --prefix {accession} --kingdom {kingdom} {format_params(params)} '{os.path.join(assembly_dir, f'{accession}.fna')}'"
-        run_command_logged(cmd, logger, error_message=f"Prokka failed for {accession}")
-
-# --- EUKARYOTIC ANNOTATION WORKFLOW ---
+def run_prokka(accessions, assembly_dir, prokka_dir, kingdom, prokka_params, logger):
+    """Run Prokka for prokaryotic annotation."""
+    for accession in accessions:
+        input_fasta = os.path.join(assembly_dir, f"{accession}.fna")
+        output_prefix = os.path.join(prokka_dir, accession)
+        prokka_cmd = f"prokka --kingdom {kingdom} --outdir {output_prefix} --prefix {accession} {format_params(prokka_params)} {input_fasta}"
+        run_command_logged(prokka_cmd, logger, error_message=f"Prokka failed for {accession}")
 
 def run_repeat_modeling(accession_dir, genome_path, cpus, logger):
-    logger.info("Stage 6.1: Running RepeatModeler to build de novo repeat library.")
-    run_command_logged(f"BuildDatabase -name genome_db '{genome_path}'", logger, cwd=accession_dir, error_message="RepeatModeler BuildDatabase failed.")
+    """Run RepeatModeler and RepeatMasker for genome masking."""
+    logger.info("Stage 6.1: Building RepeatModeler database.")
+    run_command_logged(f"BuildDatabase -name genome_db {genome_path}", logger, cwd=accession_dir, error_message="RepeatModeler BuildDatabase failed.")
     run_command_logged(f"RepeatModeler -database genome_db -threads {cpus}", logger, cwd=accession_dir, error_message="RepeatModeler failed.")
     
     rm_dirs = [d for d in os.listdir(accession_dir) if d.startswith("RM_") and os.path.isdir(os.path.join(accession_dir, d))]
@@ -224,15 +242,12 @@ def train_snap_model(round1_output_dir, logger):
     snap_dir = os.path.join(abs_r1_dir, "snap_training")
     os.makedirs(snap_dir, exist_ok=True)
     
-    # THE FIX IS HERE: Correct the search path to look inside the *.maker.output directory
     datastore_glob = os.path.join(abs_r1_dir, "*.maker.output", "*_master_datastore_index.log")
-
     logger.info(f"Searching for MAKER datastore log using pattern: {datastore_glob}")
     datastore_files = glob.glob(datastore_glob)
     if not datastore_files:
         logger.error(f"FATAL: MAKER Round 1 output not found. No datastore log file matching the pattern was found. Check MAKER Round 1 logs for errors."); sys.exit(1)
         
-    # We only need to merge the one datastore, not use the glob pattern in the command
     datastore_to_merge = datastore_files[0]
     run_command_logged(f"gff3_merge -s -d '{datastore_to_merge}' > round1.all.gff", logger, cwd=snap_dir, error_message="gff3_merge failed.")
     
@@ -243,7 +258,6 @@ def train_snap_model(round1_output_dir, logger):
 
 def create_maker_ctl_files(run_dir, maker_params, logger):
     """Programmatically creates maker_exe.ctl and copies other control files."""
-    # Create maker_exe.ctl from scratch to guarantee it's correct
     maker_exe_path = os.path.join(run_dir, 'maker_exe.ctl')
     logger.info(f"Programmatically creating {maker_exe_path}")
     repeatmasker_exe = shutil.which('RepeatMasker')
@@ -252,7 +266,6 @@ def create_maker_ctl_files(run_dir, maker_params, logger):
     with open(maker_exe_path, 'w') as f:
         f.write(f"RepeatMasker={repeatmasker_exe}\n")
 
-    # Copy bopts file from template
     shutil.copy(maker_params['maker_bopts_ctl'], run_dir)
 
 def run_maker_for_accession(accession, config, assembly_dir, maker_output_dir, logger):
@@ -261,7 +274,6 @@ def run_maker_for_accession(accession, config, assembly_dir, maker_output_dir, l
     original_genome_path = os.path.abspath(os.path.join(assembly_dir, f"{accession}.fna"))
     accession_out_dir = os.path.join(maker_output_dir, accession)
     
-    # THE FIX: Create the output directory for this accession before using it.
     os.makedirs(accession_out_dir, exist_ok=True)
     
     maker_params = config['maker_params']
@@ -269,7 +281,6 @@ def run_maker_for_accession(accession, config, assembly_dir, maker_output_dir, l
 
     repeat_lib_path, masked_genome_path = run_repeat_modeling(accession_out_dir, original_genome_path, cpus, logger)
     
-    # --- Stage 3: MAKER Round 1 ---
     logger.info(f"Stage 6.3: Running MAKER Round 1 for {accession}.")
     r1_out_dir = os.path.join(accession_out_dir, "round1")
     os.makedirs(r1_out_dir, exist_ok=True)
@@ -278,14 +289,12 @@ def run_maker_for_accession(accession, config, assembly_dir, maker_output_dir, l
     r1_opts_path = os.path.join(r1_out_dir, 'maker_opts.ctl')
     shutil.copy(maker_params['maker_opts_ctl'], r1_opts_path)
     with open(r1_opts_path, 'a') as f:
-        f.write(f"\ngenome={os.path.abspath(masked_genome_path)}\nprotein={os.path.abspath(maker_params['protein_evidence'])}\nest={os.path.abspath(maker_params['est_evidence'])}\nrmlib={os.path.abspath(repeat_lib_path)}\ncpus={cpus}\n")
+        f.write(f"\ngenome={os.path.abspath(masked_genome_path)}\nprotein={os.path.abspath(maker_params['protein_evidence'])}\nrmlib={os.path.abspath(repeat_lib_path)}\ncpus={cpus}\n")
 
     run_command_logged(f"maker -base {accession}_r1 maker_opts.ctl maker_bopts.ctl maker_exe.ctl", logger, cwd=r1_out_dir, error_message="MAKER Round 1 failed.")
     
-    # --- Stage 4: Train SNAP ---
     snaphmm_path = train_snap_model(r1_out_dir, logger)
     
-    # --- Stage 5: MAKER Round 2 ---
     logger.info(f"Stage 6.5: Running MAKER Round 2 for {accession}.")
     r2_out_dir = os.path.join(accession_out_dir, "round2")
     os.makedirs(r2_out_dir, exist_ok=True)
@@ -294,10 +303,41 @@ def run_maker_for_accession(accession, config, assembly_dir, maker_output_dir, l
     r2_opts_path = os.path.join(r2_out_dir, 'maker_opts.ctl')
     shutil.copy(maker_params['maker_opts_ctl'], r2_opts_path)
     with open(r2_opts_path, 'a') as f:
-        f.write(f"\ngenome={os.path.abspath(masked_genome_path)}\nsnaphmm={os.path.abspath(snaphmm_path)}\nest2genome=0\nprotein2genome=0\ncpus={cpus}\n")
-
+        f.write(f"\ngenome={os.path.abspath(masked_genome_path)}\nsnaphmm={os.path.abspath(snaphmm_path)}\naugustus_species={maker_params.get('augustus_species', '')}\nest2genome=0\nprotein2genome=0\ncpus={cpus}")
+###line
     run_command_logged(f"maker -base {accession}_r2 maker_opts.ctl maker_bopts.ctl maker_exe.ctl", logger, cwd=r2_out_dir, error_message="MAKER Round 2 failed.")
     logger.info(f"--- Eukaryotic Annotation for {accession} COMPLETED ---")
+
+def run_busco(accessions, config, assembly_dir, prokka_dir, maker_dir, busco_dir, logger):
+    """Run BUSCO for quality assessment of annotations."""
+    logger.info(colored("[Step 7/7] Running BUSCO for annotation quality assessment...", "green"))
+    os.makedirs(busco_dir, exist_ok=True)
+    lineage = config['busco_lineage']
+    busco_params = config.get('busco_params', {})
+    org_type = config['organism_type']
+    
+    for accession in accessions:
+        if org_type == 'PK':
+            input_file = os.path.join(prokka_dir, accession, f"{accession}.faa")
+            mode = "protein"
+        else:  # EK
+            input_file = os.path.join(maker_dir, accession, "round2", f"{accession}_r2.all.maker.proteins.fasta")
+            mode = "protein"
+        
+        if not os.path.exists(input_file):
+            logger.warning(f"No input file found for BUSCO at {input_file}. Skipping {accession}.")
+            continue
+        
+        output_prefix = os.path.join(busco_dir, accession)
+        busco_cmd = f"busco -i {input_file} -o {output_prefix} -m {mode} -l {lineage} {format_params(busco_params)} --cpu {config.get('quast_threads', 1)} --force"
+        run_command_logged(busco_cmd, logger, error_message=f"BUSCO failed for {accession}")
+        
+        summary_file = os.path.join(busco_dir, accession, f"short_summary.specific.{lineage}.{accession}.txt")
+        if os.path.exists(summary_file):
+            with open(summary_file, 'r') as f:
+                logger.info(f"BUSCO summary for {accession}:\n{f.read().strip()}")
+        else:
+            logger.warning(f"No BUSCO summary file generated for {accession}.")
 
 # --- MAIN WORKFLOW ---
 def main():
@@ -313,45 +353,58 @@ def main():
     config = load_config(args.config)
     Entrez.email = config['email']
 
-    dirs = { "ref": os.path.join(args.output_dir, "reference_data"), "asm": os.path.join(args.output_dir, "assemblies"), "quast": os.path.join(args.output_dir, "quast_output"), "prokka": os.path.join(args.output_dir, "prokka_output"), "maker": os.path.join(args.output_dir, "maker_output") }
+    dirs = {
+        "ref": os.path.join(args.output_dir, "reference_data"),
+        "asm": os.path.join(args.output_dir, "assemblies"),
+        "quast": os.path.join(args.output_dir, "quast_output"),
+        "prokka": os.path.join(args.output_dir, "prokka_output"),
+        "maker": os.path.join(args.output_dir, "maker_output"),
+        "busco": os.path.join(args.output_dir, "busco_output")
+    }
     for d in dirs.values(): os.makedirs(d, exist_ok=True)
 
-    logger.info(colored("[Step 1/6] Downloading reference data...", "green"))
+    logger.info(colored("[Step 1/7] Downloading reference data...", "green"))
     ref_genome = download_reference_genome(config['reference_genome_url'], dirs["ref"], logger)
     gff_genome = download_reference_genome(config['gff_url'], dirs["ref"], logger)
 
-    logger.info(colored("[Step 2/6] Preparing list of assemblies...", "green"))
+    logger.info(colored("[Step 2/7] Preparing list of assemblies...", "green"))
     if args.assembly_file:
         assembly_ids = read_assembly_file(args.assembly_file, logger)
         filtered_df = pd.DataFrame({"AssemblyAccession": assembly_ids})
     else:
         logger.info("No assembly file provided. Searching for assemblies from India by default.")
         df = fetch_assembly_data(config['organism_query'], logger)
-        # The location is now hardcoded to "India"
+        if df.empty:
+            logger.error("No assemblies found for the query. Please check the organism_query or provide an assembly file.")
+            return
         filtered_df = filter_rows_by_cities(df, "India", logger)
+        if args.num_assemblies:
+            filtered_df = filtered_df.head(args.num_assemblies)
         if filtered_df.empty:
             logger.error("No assemblies from India matched the query. To process other assemblies, please provide a list via the --assembly-file flag.")
             return
-            
-    logger.info(colored("[Step 3/6] Downloading assemblies...", "green"))
+
+    logger.info(colored("[Step 3/7] Downloading assemblies...", "green"))
     accessions = download_assemblies(filtered_df, dirs["asm"], config['group'], args.num_assemblies, logger)
     if not accessions:
-        logger.error("No assemblies downloaded.")
+        logger.error("No assemblies downloaded. Check NCBI access or assembly IDs.")
         return
 
-    logger.info(colored("[Step 4/6] Finalizing assembly files...", "green"))
+    logger.info(colored("[Step 4/7] Finalizing assembly files...", "green"))
     decompress_and_rename_assemblies(dirs["asm"], accessions, logger)
 
-    logger.info(colored("[Step 5/6] Running QUAST...", "green"))
+    logger.info(colored("[Step 5/7] Running QUAST...", "green"))
     run_quast(accessions, dirs["asm"], dirs["quast"], ref_genome, gff_genome, config['quast_threads'], config.get('quast_params', {}), logger)
 
     if config['organism_type'] == 'PK':
-        logger.info(colored("[Step 6/6] Running Prokaryotic Annotation (Prokka)...", "green"))
+        logger.info(colored("[Step 6/7] Running Prokaryotic Annotation (Prokka)...", "green"))
         run_prokka(accessions, dirs["asm"], dirs["prokka"], config.get('prokka_kingdom', 'Bacteria'), config.get('prokka_params', {}), logger)
     elif config['organism_type'] == 'EK':
-        logger.info(colored("[Step 6/6] Running Eukaryotic Annotation (MAKER)...", "green"))
+        logger.info(colored("[Step 6/7] Running Eukaryotic Annotation (MAKER)...", "green"))
         for accession in accessions:
             run_maker_for_accession(accession, config, dirs["asm"], dirs["maker"], logger)
+    
+    run_busco(accessions, config, dirs["asm"], dirs["prokka"], dirs["maker"], dirs["busco"], logger)
     
     logger.info(colored("\nPIPELINE COMPLETED SUCCESSFULLY!", "cyan"))
 
