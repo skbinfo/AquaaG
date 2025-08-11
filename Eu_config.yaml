@@ -22,9 +22,14 @@ organism_type: "EK"
 # QUAST parameters
 quast_threads: 16
 
+# BUSCO parameters
+busco_lineage: "fungi_odb10"
+busco_params:
+  cpu: 16
+
 location: "India"
 
-#Parameteres for Prokaryotic Genome Annotation (Prokka)
+# Parameters for Prokaryotic Genome Annotation (Prokka)
 prokka_kingdom: "Bacteria"
 prokka_env: "assembly_tool_env"
 prokka_params:
@@ -33,8 +38,9 @@ prokka_params:
 # Parameters for the Eukaryotic (MAKER) pipeline
 maker_params:
   # --- Input Evidence Files (User must provide absolute paths) ---
-  protein_evidence: "input/sp_protein.fasta"
-  est_evidence: "input/sp_est.fasta"
+  protein_evidence: "input/sc_protein.fasta"
+  #est_evidence: ""
+  augustus_species: "saccharomyces_cerevisiae_S288C"
 
   # --- MAKER Control Files (Provide absolute paths) ---
   maker_opts_ctl: "maker_opts.ctl"
@@ -44,9 +50,6 @@ maker_params:
   # --- Computational Resources ---
   cpus: 16
 
-
-
-
 # Optional empty sections
 quast_params: {}
-prokka_params: {}
+
