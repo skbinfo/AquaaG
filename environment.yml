@@ -1,3 +1,4 @@
+name: assembly_tool_env
 channels:
   - bioconda
   - conda-forge
@@ -20,3 +21,4 @@ dependencies:
   - wget
   - conda-forge::openmp
   - blast
+  - busco
