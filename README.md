@@ -30,24 +30,25 @@ AquaaG is a Python-based pipeline for downloading genomic assemblies from NCBI, 
 
 ---
 
-## Installation
-
-### 1. Clone the Repository
+## Installation and Environment Setup
+1. **Clone the Repository**:
 ```bash
 git clone https://github.com/skbinfo/AquaaG.git
 cd AquaaG
-
-### 2. Create Conda Environment
+```
+2. **Create Conda Environment**:
+The pipeline uses a Conda environment defined in `environment.yml`. Create and activate it:
 ```bash
 conda env create -f environment.yml
 conda activate assembly_tool_env
-
-### 3. Verify Installation
+```
+3. **Verify Installation**:
+Run test commands to ensure tools are installed:
 ```bash
 maker --version
 busco --version
 prokka --version
-
+```
 ## Configuration
 The pipeline uses YAML configuration files for prokaryotic and eukaryotic modes. Edit these files before running.
 
