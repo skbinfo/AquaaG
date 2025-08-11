@@ -29,11 +29,6 @@ busco_params:
 
 location: "India"
 
-# Parameters for Prokaryotic Genome Annotation (Prokka)
-prokka_kingdom: "Bacteria"
-prokka_env: "assembly_tool_env"
-prokka_params:
-  cpus: 16
 
 # Parameters for the Eukaryotic (MAKER) pipeline
 maker_params:
