@@ -107,7 +107,7 @@ The pipeline supports three modes for selecting assemblies to process:
 - Downloads and processes all assemblies from India for the organism specified in `config.yaml`.
 - Command:
   ```
-  python assembly_tool.py -c config.yaml -o output_directory
+  python AquaaG.py -c config.yaml -o output_directory
   ```
 - Behavior: Queries NCBI for assemblies matching `organism_query` (e.g., `"Saccharomyces cerevisiae[Organism]"`), filters for India-specific submitters (based on `SubmitterOrganization`), and processes all matching assemblies.
 
@@ -115,11 +115,11 @@ The pipeline supports three modes for selecting assemblies to process:
 - Limits the number of India-specific assemblies to process (e.g., 1 or 2).
 - Command:
   ```
-  python assembly_tool.py -c config.yaml -o output_directory --num-assemblies 1
+  python AquaaG.py -c config.yaml -o output_directory --num-assemblies 1
   ```
   or
   ```
-  python assembly_tool.py -c config.yaml -o output_directory --num-assemblies 2
+  python AquaaG.py -c config.yaml -o output_directory --num-assemblies 2
   ```
 - Behavior: Filters for India-specific assemblies but processes only the first N assemblies (sorted by NCBI default order) as specified by `--num-assemblies`.
 
@@ -127,14 +127,14 @@ The pipeline supports three modes for selecting assemblies to process:
 - Processes assemblies listed in a user-provided file (e.g., `genome.txt`), bypassing the India-specific filter.
 - Command:
   ```
-  python assembly_tool.py -c config.yaml -o output_directory --assembly-file genome.txt
+  python AquaaG.py -c config.yaml -o output_directory --assembly-file genome.txt
   ```
 - Behavior: Reads accession IDs from `genome.txt` (e.g., `GCA_965239625.1`) and processes only those assemblies, regardless of their submitter location.
 
 4. **Prokaryotic Mode**:
 - Use `prokaryotic_config.yaml` for prokaryotic organisms (e.g., Salmonella enterica):
   ```
-  python assembly_tool.py -c prokaryotic_config.yaml -o output_directory --num-assemblies 1
+  python AquaaG.py -c prokaryotic_config.yaml -o output_directory --num-assemblies 1
   ```
 - Supports `--assembly-file` or `--num-assemblies` as above.
 
@@ -148,10 +148,10 @@ The pipeline supports three modes for selecting assemblies to process:
 - `output_directory/pipeline.log`: Detailed log file for debugging.
 
 ## Customizing India-Specific Keywords
-The pipeline filters for India-specific assemblies using a predefined list of keywords (e.g., cities like "Delhi", "Mumbai", and institutions like "IIT", "ICMR") in the `filter_rows_by_cities` function in `assembly_tool.py`. To add more India-specific keywords:
+The pipeline filters for India-specific assemblies using a predefined list of keywords (e.g., cities like "Delhi", "Mumbai", and institutions like "IIT", "ICMR") in the `filter_rows_by_cities` function in `AquaaG.py`. To add more India-specific keywords:
 
 1. **Locate the Keyword List**:
-- Open `assembly_tool.py` and find the `filter_rows_by_cities` function.
+- Open `AquaaG.py` and find the `filter_rows_by_cities` function.
 - The `indian_cities` list contains keywords:
   ```python
   indian_cities = [
@@ -170,10 +170,10 @@ The pipeline filters for India-specific assemblies using a predefined list of ke
 - Ensure keywords are unique and relevant to `SubmitterOrganization` fields in NCBI Assembly records.
 
 3. **Save and Test**:
-- Save `assembly_tool.py`.
+- Save `AquaaG.py`.
 - Test the updated filter:
   ```
-  python assembly_tool.py -c config.yaml -o test_output
+  python AquaaG.py -c config.yaml -o test_output
   ```
 - Check `test_output/pipeline.log` for the filtered assemblies:
   ```
