@@ -1,4 +1,5 @@
-# AquaaG: Automated Genomic Assembly and Annotation Pipeline
+# AquaaG: Automated Quality Assessment and Annotation of Genomes
+
 
 AquaaG is a Python-based pipeline for downloading genomic assemblies from NCBI, performing quality assessment with QUAST, annotating prokaryotic genomes with Prokka or eukaryotic genomes with MAKER, and evaluating completeness with BUSCO. It supports filtering for India-specific assemblies by default and allows processing user-provided assembly IDs via a file (e.g., genome.txt). The pipeline is designed for bioinformatics workflows and handles both prokaryotic (PK) and eukaryotic (EK) organisms.
 
