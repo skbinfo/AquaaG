@@ -2,17 +2,14 @@
 # NOTE: If --assembly-file is not used, the pipeline will automatically search for assemblies from India.
 
 # Query for the organism in NCBI databases
-organism_query: "Salmonella enterica[Organism]"
+organism: "Mycobacterium tuberculosis "
+
+# URLs for reference data
+reference_genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/195/955/GCF_000195955.2_ASM19595v2/GCF_000195955.2_ASM19595v2_genomic.fna.gz"
+gff_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/195/955/GCF_000195955.2_ASM19595v2/GCF_000195955.2_ASM19595v2_genomic.gff.gz"
 
 # Email address for NCBI notifications
 email: "your@email.com"
-
-# Organism name
-organism: "Salmonella enterica"
-
-# URLs for reference data
-reference_genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/006/945/GCF_000006945.2_ASM694v2/GCF_000006945.2_ASM694v2_cds_from_genomic.fna.gz"
-gff_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/006/945/GCF_000006945.2_ASM694v2/GCF_000006945.2_ASM694v2_genomic.gff.gz"
 
 # NCBI taxonomic group
 group: "bacteria"
