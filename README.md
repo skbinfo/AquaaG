@@ -229,13 +229,13 @@ The pipeline filters for India-specific assemblies using a predefined list of ke
 
 ```bash
 #  Process all species in a kingdom
-python india3.py -s fungi
+python download.py -s fungi
 
 #  Process only a fixed number of species
-python india3.py -s fungi --num 5
+python download.py -s fungi --num 5
 
 #  Example: Cyanobacteria, first 3 species
-python india3.py -s Cyanobacteriota --num 3
+python download.py -s Cyanobacteriota --num 3
 ```
 
 ## Contributions
