@@ -217,7 +217,7 @@ The pipeline filters for India-specific assemblies using a predefined list of ke
 
 ---
 
-## ✨ Features
+##  Features
 - ✅ Detects **India-specific assemblies** using submitter info (cities, institutes, keywords).  
 - ✅ Downloads **reference or representative genomes** (FASTA + GFF).  
 - ✅ Fetches **India-specific assemblies** for species.  
@@ -225,16 +225,16 @@ The pipeline filters for India-specific assemblies using a predefined list of ke
 - ✅ Parallelized downloads with logging and error handling.  
 
 ---
-## 🚀 Usage
+##  Usage
 
 ```bash
-# 📌 Process all species in a kingdom
+#  Process all species in a kingdom
 python india3.py -s fungi
 
-# 📌 Process only a fixed number of species
+#  Process only a fixed number of species
 python india3.py -s fungi --num 5
 
-# 📌 Example: Cyanobacteria, first 3 species
+#  Example: Cyanobacteria, first 3 species
 python india3.py -s Cyanobacteriota --num 3
 ```
 
