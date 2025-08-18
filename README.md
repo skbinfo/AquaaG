@@ -237,6 +237,8 @@ python india3.py -s fungi --num 5
 # 📌 Example: Cyanobacteria, first 3 species
 python india3.py -s Cyanobacteriota --num 3
 
+---
+
 ## Contributions
 Contributions are welcome! Submit pull requests for bug fixes or new features. For major changes, open an issue first.
 
