@@ -209,6 +209,34 @@ The pipeline filters for India-specific assemblies using a predefined list of ke
 - **Community**: Inspired by the bioinformatics community’s open-source efforts to streamline genomic analysis.
 
 
+
+# 🇮🇳 download.py  
+**Download Reference Genomes + India-Specific Assemblies from NCBI**
+
+`download.py` is a Python tool that automates downloading **reference/representative genomes** and **India-specific assemblies** from the **NCBI Assembly database** for any given kingdom (e.g., fungi, bacteria, viruses, cyanobacteria).  
+
+---
+
+## ✨ Features
+- ✅ Detects **India-specific assemblies** using submitter info (cities, institutes, keywords).  
+- ✅ Downloads **reference or representative genomes** (FASTA + GFF).  
+- ✅ Fetches **India-specific assemblies** for species.  
+- ✅ Creates a **metadata table** (`india_assemblies_metadata.tsv`) with accession, submitter, FTP path, and saved filename.  
+- ✅ Parallelized downloads with logging and error handling.  
+
+---
+## 🚀 Usage
+
+```bash
+# 📌 Process all species in a kingdom
+python india3.py -s fungi
+
+# 📌 Process only a fixed number of species
+python india3.py -s fungi --num 5
+
+# 📌 Example: Cyanobacteria, first 3 species
+python india3.py -s Cyanobacteriota --num 3
+
 ## Contributions
 Contributions are welcome! Submit pull requests for bug fixes or new features. For major changes, open an issue first.
 
