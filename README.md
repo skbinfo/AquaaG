@@ -519,7 +519,7 @@ conda env remove -n braker_env
 conda env create -f environment_main.yml
 conda env create -f environment_braker.yml
 
-bash setup_new.sh
+bash setup.sh
 ```
 
 ---
