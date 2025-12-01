@@ -1,0 +1,46 @@
+#### Eukaryotic Annotation Config (BRAKER3) ####
+
+# Email address for NCBI notifications (REQUIRED)
+email: "your@email.com"
+
+organism: "Arabidopsis thaliana"
+
+
+# Organism type: EK for Eukaryotic (REQUIRED)
+organism_type: "EK"
+
+# --- Computational Resources ---
+# Used for QUAST and as default for BUSCO
+quast_threads: 50 
+
+# --- BUSCO QC Parameters ---
+# This is for the FINAL QC step
+busco_lineage: "fungi_odb10"
+busco_params:
+  cpu: 50
+  # Add other BUSCO QC flags here
+
+# --- Parameters for the Eukaryotic (BRAKER3) pipeline ---
+braker_params:
+  # --- Computational Resources (REQUIRED) ---
+  cpus: 50 # Max threads for BRAKER
+
+  # --- [OPTIONAL] Provide your own protein evidence ---
+  # The script auto-downloads a protein file from NCBI's reference.
+  # Use this line ONLY if you want to override it with your own file.
+  # This is used for EP and ETP modes.
+  # protein_evidence: "/path/to/your/custom_proteins.fasta"
+  
+  # --- [OPTIONAL] Add any other BRAKER flags here ---
+  
+  # e.g., for fungi
+  # fungus: true
+  
+  # e.g., to force UTR prediction (requires RNA-Seq data)
+  #UTR: "on"
+  
+  # e.g., to use a specific BUSCO lineage for TRAINING
+  # busco_lineage: "arthropoda_odb10"
+
+# Optional empty section for QUAST
+quast_params: {}
