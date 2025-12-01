@@ -1,0 +1,29 @@
+#### Prokaryotic Annotation Config ####
+
+# Email address for NCBI notifications (REQUIRED)
+email: "your@email.com"
+
+# Organism name for the REFERENCE genome (will be auto-downloaded)
+organism: "Mycobacterium tuberculosis"
+
+# NCBI taxonomic group for ncbi-genome-download
+group: "bacteria"
+
+# Organism type: PK for Prokaryotic
+organism_type: "PK"
+
+# QUAST parameters
+quast_threads: 8
+
+# BUSCO parameters
+busco_lineage: "bacteria_odb10"
+busco_params:
+  cpu: 8
+
+# Parameters for Prokaryotic Genome Annotation (Prokka)
+prokka_kingdom: "Bacteria"
+prokka_params:
+  cpus: 8
+
+# Optional empty sections
+quast_params: {}
