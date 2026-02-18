@@ -1,0 +1,25 @@
+name: assembly_tool_env
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - mamba
+  - pandas
+  - biopython
+  - pyyaml
+  - tqdm
+  - termcolor
+  - ncbi-genome-download
+  - quast
+  - prokka
+  - repeatmasker
+  - repeatmodeler
+  - snap 
+  - perl
+  - wget
+  - conda-forge::openmp
+  - blast
+  - busco
+
