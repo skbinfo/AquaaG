@@ -179,19 +179,21 @@ docker run --rm -it \
 ---
 
 ## 📁 Output Structure
+
+```text
 <OUTPUT_DIR>/
 ├── AquaG_Dashboard.html          # Interactive Chart.js dashboard (QUAST/BUSCO)
 ├── MultiQC_Report/               # Aggregated HTML report
 ├── pipeline_main.log             # Master execution log
 └── <Species_Slug>/               # e.g., Vibrio_cholerae/
-├── reference_data/           # Cached NCBI reference genomes (.fna, .gff, .faa)
-├── assemblies/               # Decompressed target FASTA files
-├── quast_output/             # Contiguity metrics
-├── prokka_output/            # (PK mode) Structural annotations (.gff, .faa)
-├── braker_output/            # (EK mode) Structural annotations (braker.aa, .gtf)
-├── busco_output/             # Completeness grading
-├── functional_annotation/    # EggNOG-mapper outputs (.emapper.annotations)
-└── <Species>_metadata.tsv    # Cached NCBI metadata
+    ├── reference_data/           # Cached NCBI reference genomes (.fna, .gff, .faa)
+    ├── assemblies/               # Decompressed target FASTA files
+    ├── quast_output/             # Contiguity metrics
+    ├── prokka_output/            # (PK mode) Structural annotations (.gff, .faa)
+    ├── braker_output/            # (EK mode) Structural annotations (braker.aa, .gtf)
+    ├── busco_output/             # Completeness grading
+    ├── functional_annotation/    # EggNOG-mapper outputs (.emapper.annotations)
+    └── <Species>_metadata.tsv    # Cached NCBI metadata
 
 ---
 
@@ -226,7 +228,7 @@ docker run --rm -it \
   -e THREADS=4 \
   -e BUSCO="bacteria_odb10" \
   aquaag-pipeline -o test_output --assembly-file test_data/test_pk_assembly.txt -a
-
+---
 ## 🛠️ Troubleshooting
 
 ### ❌ `FATAL: 'gm_key' not found!`
