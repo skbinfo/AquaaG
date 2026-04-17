@@ -1,0 +1,11 @@
+email: "test@example.com"
+organism: "Candidatus Carsonella ruddii"
+group: "bacteria"
+organism_type: "PK"
+quast_threads: 4
+busco_lineage: "bacteria_odb10"
+busco_params:
+  cpu: 4
+prokka_kingdom: "Bacteria"
+prokka_params:
+  cpus: 4
