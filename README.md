@@ -228,6 +228,7 @@ docker run --rm -it \
   -e THREADS=4 \
   -e BUSCO="bacteria_odb10" \
   aquaag-pipeline -o test_output --assembly-file test_data/test_pk_assembly.txt -a
+```
 ---
 ## 🛠️ Troubleshooting
 
