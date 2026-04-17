@@ -3,27 +3,28 @@
 # Email address for NCBI notifications (REQUIRED)
 email: "your@email.com"
 
-organism: "Arabidopsis thaliana"
-
+organism: "Saccharomyces cerevisiae"
+# Mention from which group your organism belong
+group: "fungi"
 
 # Organism type: EK for Eukaryotic (REQUIRED)
 organism_type: "EK"
 
 # --- Computational Resources ---
 # Used for QUAST and as default for BUSCO
-quast_threads: 50 
+quast_threads: 20 
 
 # --- BUSCO QC Parameters ---
 # This is for the FINAL QC step
-busco_lineage: "fungi_odb10"
+busco_lineage: "fungi"
 busco_params:
-  cpu: 50
+  cpu: 20
   # Add other BUSCO QC flags here
 
 # --- Parameters for the Eukaryotic (BRAKER3) pipeline ---
 braker_params:
   # --- Computational Resources (REQUIRED) ---
-  cpus: 50 # Max threads for BRAKER
+  cpus: 20 # Max threads for BRAKER
 
   # --- [OPTIONAL] Provide your own protein evidence ---
   # The script auto-downloads a protein file from NCBI's reference.
