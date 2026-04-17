@@ -1,92 +1,68 @@
 # AquaaG: Automated Quality Assessment and Annotation of Genomes
 
-AquaaG is a Python-based pipeline for:
+> A comprehensive, fully containerized Python-based pipeline for downloading, quality-assessing, annotating, and functionally mapping genomic assemblies from NCBI.
 
-* Downloading genomic assemblies from NCBI
-* Performing quality assessment with **QUAST**
-* Annotating:
+---
 
-  * **Prokaryotic genomes** with **Prokka**
-  * **Eukaryotic genomes** with **BRAKER3** (inside Docker, with repeat masking)
-* Evaluating annotation completeness with **BUSCO**
+## 📋 Table of Contents
 
-It supports **India-specific filtering** of assemblies (based on submitter metadata) and can also process **user-provided assembly IDs** via a file (e.g. `assembly.txt`). The pipeline is designed for production-grade bioinformatics workflows and supports both **prokaryotic (PK)** and **eukaryotic (EK)** organisms.
+- [Overview](#overview)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Running the Pipeline](#running-the-pipeline)
+- [Output Structure](#output-structure)
+- [Regional Filtering](#regional-filtering)
+- [Troubleshooting](#troubleshooting)
+- [download.py Companion Tool](#downloadpy-companion-tool)
+- [Contributions & Acknowledgments](#contributions--acknowledgments)
+
+---
+
+## Overview
+
+AquaaG automates the full genome analysis workflow:
+
+- **Download** genomic assemblies from NCBI
+- **Quality assessment** with QUAST
+- **Structural annotation** — Prokaryotes via Prokka, Eukaryotes via BRAKER3 (with automated repeat masking)
+- **Completeness evaluation** with BUSCO
+- **Functional annotation mapping** with EggNOG-mapper
+- **Interactive reporting** via a Chart.js Dashboard and MultiQC report
+
+Supports **regional metadata filtering** (e.g., country or institution-specific submissions), user-provided assembly ID lists, and direct local `.fna` files. Designed for production-grade bioinformatics with **zero host-system dependencies**.
 
 ---
 
 ## ✨ Features
 
-* **Assembly Fetching**
-
-  * Downloads assemblies from the NCBI Assembly database
-  * Optional filtering for **India-specific submissions** (by submitter organization)
-
-* **Quality Assessment**
-
-  * Uses **QUAST** to evaluate assembly quality against a reference genome + GFF
-
-* **Annotation**
-
-  * **Prokaryotic (PK)**: Annotation with **Prokka**
-  * **Eukaryotic (EK)**:
-
-    * Repeat library construction using **RepeatModeler**
-    * Genome masking with **RepeatMasker**
-    * **BRAKER3** gene prediction inside a **Docker** container (GeneMark-ETP, AUGUSTUS)
-
-* **Completeness Evaluation**
-
-  * Runs **BUSCO** on predicted proteins (Prokka or BRAKER3 output)
-
-* **Flexible Modes**
-
-  * **Species mode**: `--species "Genus species"`
-  * **Kingdom mode**: `--kingdom Bacteria/Fungi/...` with automatic species discovery
-  * **Assembly list mode**: `--assembly-file assembly.txt` for explicit accessions
-  * **India-only filtering**: `-I / --india-only`
-  * **Any source (default)**: `-a / --any-source`
-
-* **Parallel & Configurable**
-
-  * Multi-threaded components (QUAST, Prokka, BRAKER3, BUSCO)
-  * All major parameters configured via **YAML** files
+| Feature | Description |
+|---|---|
+| 🐳 **100% Dockerized** | Eliminates dependency conflicts. Runs entirely via a master Docker container, including heavy tools like BRAKER3 and EggNOG-mapper. |
+| ⏯️ **Zero-API Resumption** | Caches NCBI metadata locally so interrupted runs resume instantly without re-querying NCBI. |
+| 🌍 **Regional Filtering** | Optional `-R` / `--region-only` flag to process submissions from specific geographic locations or institutions. |
+| 📊 **Quality Assessment** | QUAST evaluation against a reference genome + GFF. |
+| 🧬 **End-to-End Annotation** | PK: Prokka. EK: RepeatModeler → RepeatMasker → BRAKER3. |
+| 🔬 **Functional Mapping** | COG, KEGG, and GO term mapping via EggNOG-mapper. |
+| 📈 **Automated Reporting** | Unified `AquaG_Dashboard.html` (Chart.js) and `multiqc_report.html`. |
+| 🗂️ **Flexible Input Modes** | Species name, Kingdom, accession list file, or local FASTA directory. |
 
 ---
 
 ## 🧩 Requirements
 
-* **Operating System**
-  Linux (tested on Ubuntu-like environments; HPC clusters should also work)
+Because AquaaG is fully containerized, **no Conda, Python, or bioinformatics tools** need to be installed on your host machine.
 
-* **Conda**
-  Miniconda or Anaconda installed and available in `PATH`
-
-* **Docker**
-  AquaaG uses **BRAKER3 via Docker** for eukaryotic annotation. **Docker Engine must be installed and running before you use AquaaG.**
-
-  * Installation instructions are available from the official Docker documentation:
-    [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/)
-  * After installation, verify Docker with:
-
-    ```bash
-    docker run hello-world
-    ```
-
-* **Internet Access**
-
-  * Required for:
-
-    * NCBI downloads (assemblies, references, proteins)
-    * BUSCO lineage datasets (first-time download)
-    * Docker image pulls (BRAKER3 container)
-
-* **Disk Space**
-
-  * Recommended: **10–20 GB** free space (more for many or large genomes)
+- **OS:** Linux or macOS (Ubuntu-like environments and HPC clusters with Docker access supported)
+- **Docker Engine:** Must be installed and running
+  - Install: https://docs.docker.com/engine/install/
+  - Verify: `docker run hello-world`
+- **Internet Access:** Required for NCBI downloads, BUSCO lineages, and Docker image pulls
+- **Disk Space:** 10–20 GB recommended (~50 GB additional if downloading the EggNOG functional database)
 
 ---
 
-## 📦 Installation and Environment Setup
+## 📦 Installation
 
 ### 1. Clone the Repository
 
@@ -95,504 +71,218 @@ git clone https://github.com/skbinfo/AquaaG.git
 cd AquaaG
 ```
 
-### 2. Ensure Docker Is Installed
+### 2. Place Your GeneMark Key *(Required for Eukaryotes only)*
 
-Install Docker Engine following the official instructions:
-[https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/)
+To run BRAKER3 on eukaryotic genomes, obtain a free academic GeneMark-ETP license key:
 
-Then test that Docker works:
+1. Download `gm_key` from: https://exon.gatech.edu/GeneMark/license_download.cgi
+2. Place the `gm_key` file directly in your `AquaaG/` directory. The pipeline will auto-detect and mount it.
 
-```bash
-docker run hello-world
-```
-
-If this succeeds, Docker is correctly installed and the current user can run containers.
-
-### 3. Run the Setup Script
-
-AquaaG provides a setup helper script that:
-
-* Creates two Conda environments:
-
-  * `assembly_tool_env` (main pipeline tools)
-  * `braker_env` (Docker client / helper tools)
-* Pulls the **BRAKER3** Docker image
-* Copies **AUGUSTUS config** from inside the Docker image to your host
-* Configures `AUGUSTUS_CONFIG_PATH`
-* Registers your **GeneMark-ETP `gm_key`** for BRAKER3
-
-Run:
+### 3. Run the docker build
 
 ```bash
-bash setup_new.sh
+docker build -t aquaag-pipeline:latest .
 ```
 
-During setup, you will be prompted for:
+This will:
 
-* A target directory for `AUGUSTUS_CONFIG_PATH`
-* The local path to your **GeneMark-ETP `gm_key`** file (downloaded from the GeneMark website)
-
-After the script completes, run:
-
-```bash
-source ~/.bashrc
-```
-
-or open a **new shell** so that `AUGUSTUS_CONFIG_PATH` and `BRAKER_GM_KEY` are available.
-
-### 4. Activate the Main Environment
-
-Most of the pipeline is run from the **main environment**:
-
-```bash
-conda activate assembly_tool_env
-```
-
-### 5. Verify Installation
-
-Check that core tools are visible:
-
-```bash
-quast.py --version
-prokka --version
-busco --version
-docker --version
-```
-
-BRAKER3 itself is run **inside Docker**, so you do not need a host-level `braker.pl` installation.
-
----
-
-## ⚙️ Configuration
-
-AquaaG uses separate YAML configuration files for **eukaryotic** and **prokaryotic** pipelines:
-
-* **Eukaryotic config:** `Eu_config.yaml`
-* **Prokaryotic config:** `Pr_config.yaml`
-
-Edit these files **before** running the pipeline.
-
----
-
-### 🧬 Eukaryotic Config (`Eu_config.yaml`)
-
-Example:
-
-```yaml
-#### Eukaryotic Annotation Config (BRAKER3) ####
-
-email: "your@email.com"
-
-organism: "Arabidopsis thaliana"
-organism_type: "EK"
-
-quast_threads: 50
-
-busco_lineage: "fungi_odb10"
-busco_params:
-  cpu: 50
-
-braker_params:
-  cpus: 50
-  # Optional extras:
-  # fungus: true
-  # UTR: "on"
-  # protein_evidence: "/absolute/path/to/custom_proteins.fasta"
-
-quast_params: {}
-```
-
-**Key fields:**
-
-* `email` – used for NCBI Entrez queries (required).
-* `organism` – scientific name used to fetch **reference genome + GFF + proteins** from NCBI.
-* `organism_type` – must be `"EK"` for the eukaryotic pipeline.
-* `quast_threads` – number of CPU threads for QUAST.
-* `busco_lineage` – BUSCO lineage database; e.g.:
-
-  * `embryophyta_odb10` for plants
-  * `fungi_odb10` for fungi
-  * `metazoa_odb10` for animals
-* `busco_params` – extra BUSCO parameters; `cpu` is recommended.
-* `braker_params` – configuration for BRAKER3:
-
-  * `cpus` (required) – number of threads for BRAKER
-  * optional flags such as `fungus: true`, `UTR: "on"`, or a custom `protein_evidence` path.
-* `quast_params` – additional QUAST options (may be left empty `{}`).
-
----
-
-### 🦠 Prokaryotic Config (`Pr_config.yaml`)
-
-Example:
-
-```yaml
-#### Prokaryotic Annotation Config ####
-
-email: "your@email.com"
-
-organism: "Mycobacterium tuberculosis"
-group: "bacteria"
-
-organism_type: "PK"
-
-quast_threads: 8
-
-busco_lineage: "bacteria_odb10"
-busco_params:
-  cpu: 8
-
-prokka_kingdom: "Bacteria"
-prokka_params:
-  cpus: 8
-
-quast_params: {}
-```
-
-**Key fields:**
-
-* `organism` – reference organism used to fetch **reference genome + GFF + proteins**.
-* `group` – NCBI download group for `ncbi-genome-download` (e.g. `bacteria`, `fungi`, `viral`).
-* `organism_type` – must be `"PK"` for the prokaryotic pipeline.
-* `quast_threads` – number of CPU threads for QUAST.
-* `busco_lineage` – BUSCO lineage for prokaryotes (`bacteria_odb10`, `archaea_odb10`, etc.).
-* `busco_params` – extra BUSCO parameters.
-* `prokka_kingdom` – Prokka kingdom (e.g. `"Bacteria"`, `"Archaea"`).
-* `prokka_params` – additional Prokka options (e.g. `cpus`, `genus`, `species`, `strain`).
-
----
-
-### 🔖 Assembly List File (`assembly.txt`)
-
-For **assembly-file mode**, create a text file with one NCBI Assembly Accession per line:
-
-```text
-GCF_000000000.1
-GCA_123456789.1
-```
-
-Use this file with `--assembly-file assembly.txt`.
+- Build the `aquaag-pipeline:latest` Docker image
+- Detect your `gm_key`
+- Optionally pre-download the 50 GB EggNOG database into `./eggnog_db/` (required for `--run-func`)
 
 ---
 
 ## 🚀 Running the Pipeline
 
-The main entry point is **`AquaaG.py`**.
+AquaaG is executed entirely through `docker run`, using environment variables (`-e`) to configure the pipeline on the fly.
 
-General pattern:
+### Standard Docker Boilerplate
+
+Every command must begin with this block:
 
 ```bash
-python AquaaG.py -c <CONFIG.yaml> -o <OUTPUT_DIR> [MODE OPTIONS] [FILTER OPTIONS]
+docker run --rm -it \
+  -u $(id -u):$(id -g) \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD":"$PWD" -w "$PWD" \
+  -e HOME=/tmp
 ```
 
 ---
 
-### 1. Species Mode (`--species`)
+### Mode 1: Species Mode (`-s`)
 
 Process one specific species by scientific name.
 
-Example (eukaryote):
+**Example — Eukaryote, 1 assembly, functional annotation enabled:**
 
 ```bash
-python AquaaG.py \
-  -c Eu_config.yaml \
-  -o output_eu \
-  --species "Arabidopsis thaliana" \
-  -I \
-  --num-assemblies 1
+docker run --rm -it \
+  -u $(id -u):$(id -g) --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD":"$PWD" -w "$PWD" -e HOME=/tmp \
+  -e EMAIL="your@email.com" \
+  -e TYPE="EK" \
+  -e GROUP="plant" \
+  -e THREADS=40 \
+  -e BUSCO="embryophyta_odb10" \
+  aquaag-pipeline -o arabidopsis_results -s "Arabidopsis thaliana" --num-assemblies 1 --run-func
 ```
 
-* `--species` – species name for assembly search.
-* `-I / --india-only` – only process assemblies whose submitter organization matches India-related keywords.
-* `--num-assemblies` – max number of assemblies to download for this species.
-
-If you **omit `-I`**, the pipeline processes assemblies from **any submitter**.
+> **Note:** For eukaryotes, BRAKER3 will interactively ask for RNA-Seq or protein evidence paths on the first assembly, then autonomously cache those choices for all subsequent assemblies.
 
 ---
 
-### 2. Kingdom Mode (`--kingdom`)
+### Mode 2: Kingdom Mode (`-k`)
 
-Automatically discover species within a kingdom and process a subset of them.
+Automatically discover species within a kingdom and process a subset.
 
-Example (bacteria, any submitter):
+**Example — Prokaryote, 3 bacteria species:**
 
 ```bash
-python AquaaG.py \
-  -c Pr_config.yaml \
-  -o output_pk_kingdom \
-  --kingdom Bacteria \
-  --num-species 3 \
-  --num-assemblies 1 \
-  -a
+docker run --rm -it \
+  -u $(id -u):$(id -g) --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD":"$PWD" -w "$PWD" -e HOME=/tmp \
+  -e EMAIL="your@email.com" \
+  -e TYPE="PK" \
+  -e GROUP="bacteria" \
+  -e THREADS=20 \
+  -e BUSCO="bacteria_odb10" \
+  aquaag-pipeline -o bulk_bacteria_results -k "Bacteria" --num-species 3 --num-assemblies 1 -a --run-func
 ```
-
-* `--kingdom` – kingdom-level search term (e.g. `Bacteria`, `Fungi`).
-* `--num-species` – maximum number of species to process.
-* `--num-assemblies` – max assemblies per species.
-* `-a / --any-source` – process assemblies from any submitter (no India-only filter).
-
-If you use `-I` instead of `-a`, only species with at least one **India-submitted** assembly are selected.
 
 ---
 
-### 3. Assembly List Mode (`--assembly-file`)
+### Mode 3: Local Assembly Directory (`--assembly-dir`)
 
-Process **specific accessions** defined in a text file, using `organism` in the config as the reference.
+Annotate your own unpublished genomes without downloading from NCBI.
 
-Example (prokaryote):
+**Example — Prokaryote, custom FASTA files in `./my_genomes/`:**
 
 ```bash
-python AquaaG.py \
-  -c Pr_config.yaml \
-  -o output_pk_assemblies \
-  --assembly-file assembly.txt \
-  -a
+docker run --rm -it \
+  -u $(id -u):$(id -g) --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD":"$PWD" -w "$PWD" -e HOME=/tmp \
+  -e EMAIL="your@email.com" \
+  -e TYPE="PK" \
+  -e ORGANISM="Vibrio cholerae" \
+  -e THREADS=20 \
+  -e BUSCO="vibrionales_odb10" \
+  aquaag-pipeline -o custom_vibrio_results --assembly-dir ./my_genomes/ --run-func
 ```
 
-* Uses `organism` from the config as the reference species.
-* Downloads only the listed accessions.
-* India filtering is not applied in this mode (you control the accessions explicitly).
+> **Note:** `-e ORGANISM` is still required so QUAST knows which reference genome to download for quality grading.
 
 ---
 
 ## 📁 Output Structure
-
-Depending on mode, AquaaG creates an output directory structure like:
-
-### Species / Kingdom Modes
-
-```text
 <OUTPUT_DIR>/
-  <Species_Slug>/                # e.g. Arabidopsis_thaliana
-    reference_data/
-      *.fna                      # reference genome
-      *.gff                      # reference annotation
-      *.faa                      # reference proteins (if available)
-    assemblies/
-      GCF_XXXXXXX.fna
-      ...
-    quast_output/
-      report.txt
-      report.html
-      ...
-    prokka_output/               # PK mode
-      GCF_XXXXXXX/
-        *.gff
-        *.faa
-        ...
-    braker_output/               # EK mode
-      GCF_XXXXXXX/
-        braker.aa                # predicted proteins
-        braker.gtf               # gene models
-        GeneMark-ETP/            # GeneMark internals
-        ...
-    busco_output/
-      GCF_XXXXXXX/
-        short_summary.specific.<lineage>.*.txt
-    pipeline_main.log
-```
-
-### Assembly-File Mode
-
-In `--assembly-file` mode (single reference organism), the structure is:
-
-```text
-<OUTPUT_DIR>/
-  reference_data/
-  assemblies/
-  quast_output/
-  prokka_output/      # PK mode
-  braker_output/      # EK mode
-  busco_output/
-  pipeline_main.log
-```
+├── AquaG_Dashboard.html          # Interactive Chart.js dashboard (QUAST/BUSCO)
+├── MultiQC_Report/               # Aggregated HTML report
+├── pipeline_main.log             # Master execution log
+└── <Species_Slug>/               # e.g., Vibrio_cholerae/
+├── reference_data/           # Cached NCBI reference genomes (.fna, .gff, .faa)
+├── assemblies/               # Decompressed target FASTA files
+├── quast_output/             # Contiguity metrics
+├── prokka_output/            # (PK mode) Structural annotations (.gff, .faa)
+├── braker_output/            # (EK mode) Structural annotations (braker.aa, .gtf)
+├── busco_output/             # Completeness grading
+├── functional_annotation/    # EggNOG-mapper outputs (.emapper.annotations)
+└── <Species>_metadata.tsv    # Cached NCBI metadata
 
 ---
 
-## 🇮🇳 Customizing India-Specific Filtering
+## 🌍 Regional Filtering
 
-India-specific filtering is implemented by the `filter_for_india` function in `AquaaG.py`. It uses a list of keywords (`indian_cities`) matched against the `SubmitterOrganization` field from NCBI.
+AquaaG supports metadata filtering (`-R` / `--region-only`) to exclusively process submissions from specific regions or institutions.
 
-Snippet:
+By default, the pipeline includes a built-in list of Indian cities and institutes (e.g., `"NIPGR"`, `"Delhi"`, `"CSIR"`).
 
-```python
-indian_cities = [
-    "IND", "Indian", "india", "India",
-    "Agartala", "Ahmedabad", "Aizawl", "Ajmer",
-    "Allahabad", "Amritsar", "Anand", "Avikanagar",
-    "Aurangabad", "Amravati", "Bangalore", "Bareilly",
-    # ... many more cities/institutes ...
-    "ICMR", "IMTECH", "CSIR", "IIT", "NIT", "IISC",
-    "AIIMS", "SRM", "CDRI", "ICGEB"
-]
+**To customize for your own region:**
+
+1. Open `AquaaG.py`
+2. Locate the `filter_by_region` (or `filter_for_india`) function
+3. Update the `indian_cities` array with your desired keywords (e.g., `["USA", "NIH", "Oxford"]`)
+4. Rebuild the Docker image:
+```bash
+   docker build -t aquaag-pipeline:latest .
 ```
+5. Run the pipeline with the `-R` flag
 
-### Extend the List
+---
+## Quick Start: Verifying Your Installation
 
-1. Open `AquaaG.py` and locate `filter_for_india`.
-2. Add new city/institution keywords to `indian_cities`, for example:
+To verify that AquaaG and Docker are correctly installed and functioning, we provide a minimal toy dataset. This test will download a very small bacterial genome, assess its quality, annotate it, and evaluate its completeness in just a few minutes.
 
-```python
-indian_cities = [
-    ...
-    "Tamil Nadu",
-    "NCCS"
-]
+**1. Run the Prokaryotic Test:**
+```bash
+docker run --rm -it \
+  -u $(id -u):$(id -g) --group-add $(stat -c '%g' /var/run/docker.sock) -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":"$PWD" -w "$PWD" -e HOME=/tmp \
+  -e EMAIL="test@example.com" \
+  -e TYPE="PK" \
+  -e THREADS=4 \
+  -e BUSCO="bacteria_odb10" \
+  aquaag-pipeline -o test_output --assembly-file test_data/test_pk_assembly.txt -a
+
+## 🛠️ Troubleshooting
+
+### ❌ `FATAL: 'gm_key' not found!`
+
+You are running Eukaryotic mode (`TYPE="EK"`) but the `gm_key` file is missing from the directory where you execute the `docker run` command. Move the key to your current directory and rerun.
+
+### ⚠️ EggNOG Database Warnings
+If you pass `--run-func` but see a warning that functional annotation was skipped, it means the required 50GB database is missing. As intended, the EggNOG database download is processed securely via Docker to avoid local environment conflicts. 
+
+You can resolve this by running `bash setup.sh` and accepting the prompt to download `eggnog_db`. Alternatively, you can trigger the Docker download manually in your current directory:
+```bash
+mkdir -p "$PWD/eggnog_db"
+docker run --rm -it \
+  -v "$PWD/eggnog_db":/eggnog_db \
+  --entrypoint /bin/bash \
+  quay.io/biocontainers/eggnog-mapper:2.1.12--pyhdfd78af_2 \
+  -c "sed -i 's/eggnogdb.embl.de/eggnog5.embl.de/g' \$(which download_eggnog_data.py) && download_eggnog_data.py -P -y --data_dir /eggnog_db && chown -R \$(id -u):\$(id -g) /eggnog_db"
 ```
+### 🔄 Pipeline Crashes or NCBI Timeouts
 
-3. Save `AquaaG.py` and rerun AquaaG with `-I` / `--india-only`.
+Do not panic. AquaaG has **Zero-API Resumption**. Simply re-run the exact same `docker run` command. The pipeline reads its local cache, skips all completed steps, and resumes from where it stopped.
 
-**Best practices:**
+### 💬 BRAKER3 Interactive Prompts
 
-* Avoid overly generic terms like `"Institute"` to reduce false positives.
-* Inspect submitter organizations manually via:
-
-  ```bash
-  esearch -db assembly -query "Mycobacterium tuberculosis[Organism]" \
-    | esummary \
-    | xtract -pattern DocumentSummary -element AssemblyAccession,SubmitterOrganization
-  ```
+AquaaG caches your BRAKER3 answers (mode, SRA IDs, protein paths) after the first assembly of a species and autonomously applies them to all subsequent assemblies, enabling hands-free bulk processing.
 
 ---
 
-## 🛠 Troubleshooting
+## 🌐 `download.py` Companion Tool
 
-### 1. No Assemblies Found
+`download.py` focuses exclusively on downloading and cataloging assemblies from NCBI, with special support for regional submissions.
 
-* Check `pipeline_main.log` under your output directory.
-* Verify that `organism` or `kingdom` in the config file is correct.
-* In India-only mode (`-I`), there may simply be no India-submitted assemblies.
-* Use `--any-source` or `--assembly-file` as a fallback.
+### Features
 
-### 2. Docker / BRAKER3 Issues
+- Detects regional assemblies using submitter info (cities, institutes, keywords)
+- Downloads reference or representative genomes (FASTA + GFF)
+- Produces a metadata table (e.g., `assemblies_metadata.tsv`)
+- Parallelized downloads with logging and error handling
 
-If BRAKER fails or logs mention missing `prothint.gff`, `evidence.gff`, or GeneMark license issues:
-
-* Confirm Docker is running:
-
-  ```bash
-  docker run hello-world
-  ```
-
-* Check that the BRAKER image is available:
-
-  ```bash
-  docker images | grep braker
-  ```
-
-* Verify environment variables:
-
-  * `AUGUSTUS_CONFIG_PATH` points to the directory created by `setup_new.sh`.
-  * `BRAKER_GM_KEY` points to your `gm_key` file under `.braker_keys/`.
-
-AquaaG attempts an **automatic recovery** if GeneMark-ETP complains about missing ProtHint outputs by copying found `prothint.gff` / `evidence.gff` into expected directories and re-running BRAKER.
-
-### 3. BUSCO Failures
-
-* Check that `busco_lineage` in the config matches your organism type (`bacteria_odb10`, `archaea_odb10`, `fungi_odb10`, `embryophyta_odb10`, etc.).
-* Ensure BUSCO lineages are downloaded (BUSCO will log if databases are missing).
-* Confirm the BUSCO input file exists:
-
-  * PK: Prokka `.faa` file under `prokka_output/`
-  * EK: `braker.aa` under `braker_output/`
-
-### 4. RepeatModeler / RepeatMasker Issues (EK Only)
-
-* Confirm tools are installed in `assembly_tool_env` and in `PATH`:
-
-  ```bash
-  BuildDatabase -h
-  RepeatModeler -h
-  RepeatMasker
-  ```
-
-* Check the log for missing dependencies or incompatible options.
-
-### 5. Conda / Environment Issues
-
-If tools are missing or versions look wrong:
+### Usage
 
 ```bash
-conda env remove -n assembly_tool_env
-conda env remove -n braker_env
+# Process all species in a kingdom (e.g., fungi)
+python download.py -s fungi
 
-conda env create -f environment_main.yml
-conda env create -f environment_braker.yml
-
-bash setup.sh
+# Process only a fixed number of species
+python download.py -s fungi --num 5
 ```
+
+Outputs from `download.py` can be used to curate custom `assembly.txt` lists for AquaaG's `--assembly-file` workflow.
 
 ---
 
 ## 🤝 Contributions & Acknowledgments
 
-* **Contributions** are welcome via pull requests or issues:
+Contributions are welcome via pull requests or issues for bug reports, feature requests, or documentation improvements.
 
-  * Bug reports
-  * Feature requests
-  * Documentation improvements
-
-* **Tools and Libraries**
-
-  * **BRAKER3**, **GeneMark-ETP**, **AUGUSTUS**
-  * **Prokka**
-  * **QUAST**
-  * **BUSCO**
-  * **RepeatModeler**
-  * **RepeatMasker**
-  * **pandas**, **Biopython**, and others
-
-* **Community**
-
-  * Inspired by open-source efforts in genome assembly and annotation
-  * Thanks to all users and collaborators who tested and suggested improvements
-
----
-
-# 🇮🇳 `download.py`
-
-**Download Reference Genomes + India-Specific Assemblies from NCBI**
-
-`download.py` is a companion tool in this repository that focuses on **downloading and cataloging assemblies** from NCBI, with special support for **India-specific submissions**.
-
----
-
-## 🔍 Features
-
-* Detects **India-specific assemblies** using submitter info (cities, institutes, keywords)
-* Downloads **reference or representative genomes** (FASTA + GFF)
-* Fetches **India-specific assemblies** for multiple species in a kingdom
-* Produces a **metadata table** (e.g. `india_assemblies_metadata.tsv`)
-* Parallelized downloads with logging and error handling
-
----
-
-## ▶️ Usage
-
-```bash
-# Process all species in a kingdom (e.g. fungi)
-python download.py -s fungi
-
-# Process only a fixed number of species
-python download.py -s fungi --num 5
-
-# Example: Cyanobacteria, first 3 species
-python download.py -s Cyanobacteriota --num 3
-```
-
-You can use outputs from `download.py` to:
-
-* Select species to feed into `AquaaG.py` (species or assembly-file modes)
-* Curate `assembly.txt` lists for `--assembly-file` workflows
-
----
-
-## 🙏 Acknowledgments for `download.py`
-
-* Uses the same India-filtering strategy as AquaaG
-* Built on top of:
-
-  * NCBI **Entrez**, **esearch/esummary/xtract**
-  * **pandas** for metadata management
-
-For questions or issues related to `AquaaG` or `download.py`, please **open an issue** on the GitHub repository.
+**Built on open-source tools including:**
+[BRAKER3](https://github.com/Gaius-Augustus/BRAKER) · [GeneMark-ETP](http://exon.gatech.edu/GeneMark/) · [AUGUSTUS](https://github.com/Gaius-Augustus/Augustus) · [Prokka](https://github.com/tseemann/prokka) · [QUAST](https://github.com/ablab/quast) · [BUSCO](https://busco.ezlab.org/) · [EggNOG-mapper](https://github.com/eggnogdb/eggnog-mapper) · [MultiQC](https://multiqc.info/) · [RepeatModeler](https://github.com/Dfam-consortium/RepeatModeler)
