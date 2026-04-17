@@ -27,3 +27,4 @@ prokka_params:
 
 # Optional empty sections
 quast_params: {}
+
