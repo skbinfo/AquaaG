@@ -283,8 +283,33 @@ Outputs from `download.py` can be used to curate custom `assembly.txt` lists for
 
 ---
 
-## 🤝 Contributions & Acknowledgments
+To ensure strict reproducibility and eliminate host-system dependency conflicts, AquaaG is encapsulated within a custom Docker image utilizing hard-pinned software versions. 
 
+### Integrated Tool Versions
+During the validation runs described in the AquaaG manuscript, the following specific versions of Python modules and integrated bioinformatics tools were utilized:
+
+* **Quality Assessment:** QUAST `v5.3.0`
+* **Prokaryotic Annotation:** Prokka `v1.15.6`
+* **Eukaryotic Repeat Masking:** RepeatModeler `v2.0.7`, RepeatMasker `v4.2.2`
+* **Eukaryotic Gene Prediction:** BRAKER3 `v3.0.8` (via Docker-in-Docker)
+* **Completeness Evaluation:** BUSCO `v6.0.0`
+* **Functional Annotation:** EggNOG-mapper `v2.1.12`
+* **Reporting:** MultiQC `v1.33`
+* **Core Environment:** Python `v3.9.19`, Pandas `v2.3.1`, Biopython `v1.85`
+
+### Reference Database Versions
+The pipeline dynamically downloads or utilizes the following databases. For the manuscript validation, the specific versions used were:
+* **BUSCO Lineages:** `bacteria_odb10`, `vibrionales_odb10`, and `embryophyta_odb10` (All based on **OrthoDB v10**).
+* **Functional Orthology:** **EggNOG v5.0** database (downloaded automatically via the `setup.sh` script).
+* **Reference Genomes:** Dynamically fetched as the "latest RefSeq" via NCBI Entrez during runtime.
+
+### Validation Genome Releases
+The validation of this pipeline (as presented in the manuscript) was performed using the following NCBI genome releases:
+* **Prokaryotic Validation:** *Vibrio cholerae* assemblies (e.g., `GCF_027158335.1`, `GCF_051592365.1`, `GCF_051594865.1`).
+* **Eukaryotic Validation:** *Arabidopsis thaliana* assemblies benchmarked against the TAIR10.1 Reference Genome (`GCF_000001735.4`).
+---
+
+## 🤝 Contributions & Acknowledgments
 Contributions are welcome via pull requests or issues for bug reports, feature requests, or documentation improvements.
 
 **Built on open-source tools including:**
