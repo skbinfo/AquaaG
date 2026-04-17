@@ -194,7 +194,7 @@ docker run --rm -it \
     ├── busco_output/             # Completeness grading
     ├── functional_annotation/    # EggNOG-mapper outputs (.emapper.annotations)
     └── <Species>_metadata.tsv    # Cached NCBI metadata
-
+```
 ---
 
 ## 🌍 Regional Filtering
