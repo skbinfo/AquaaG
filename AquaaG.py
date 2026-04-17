@@ -75,6 +75,8 @@ def load_config(config_file):
         config.setdefault('quast_params', {})
         config.setdefault('prokka_params', {})
         config.setdefault('busco_params', {})
+        # Initialize an empty list for the new regional filter if not provided
+        config.setdefault('regional_keywords', [])
 
         return config
     except Exception as e:
@@ -121,12 +123,7 @@ def run_command_logged(command, logger, cwd=None, error_message="Command failed"
         )
         sys.exit(1)
 
-# --- add this helper near the top (after Entrez.email is set) ---
 def resolve_taxid(name, logger, max_attempts=2):
-    """
-    Try to resolve a scientific name to a taxonomy ID (taxid) using Entrez.taxonomy.
-    Returns taxid (int) or None if not found.
-    """
     if not name:
         return None
     name_clean = name.strip().strip('"')
@@ -140,7 +137,6 @@ def resolve_taxid(name, logger, max_attempts=2):
                 taxid = rec["IdList"][0]
                 logger.info(f"Resolved taxid {taxid} for name '{name_clean}'")
                 return int(taxid)
-            # fallback: try without the [Scientific Name] qualifier
             if attempt == 0:
                 handle = Entrez.esearch(db="taxonomy", term=name_clean, retmax=1)
                 rec = Entrez.read(handle)
@@ -155,12 +151,8 @@ def resolve_taxid(name, logger, max_attempts=2):
     logger.warning(f"Could not resolve taxid for '{name}'")
     return None
 
-
-# --- replace fetch_reference_urls with this version ---
 def fetch_reference_urls(species_name, logger):
     logger.info(f"Searching NCBI for reference files for '{species_name}'...")
-
-    # Prefer taxid-based queries for exactness
     taxid = resolve_taxid(species_name, logger)
     if taxid:
         terms = [
@@ -169,7 +161,6 @@ def fetch_reference_urls(species_name, logger):
             f"txid{taxid}[Organism] AND latest[Filter]"
         ]
     else:
-        # fallback to quoted organism name (previous behaviour)
         terms = [
             f'"{species_name}"[Organism] AND "reference genome"[Filter] AND "latest refseq"[Filter]',
             f'"{species_name}"[Organism] AND "representative genome"[Filter] AND "latest refseq"[Filter]',
@@ -212,12 +203,8 @@ def fetch_reference_urls(species_name, logger):
     return None, None, None
 
 
-# --- replace fetch_assembly_data with this version ---
 def fetch_assembly_data(organism_query, logger):
     logger.info(f"Fetching assembly metadata for: '{organism_query}'")
-
-    # If caller already passed a '"Name"[Organism]' or txid..., try to extract a bare name for taxid resolution.
-    # Accept either a raw species name or a query like '"Genus species"[Organism]'.
     name_match = re.match(r'^\s*"?([^"\[]+?)"?\s*(?:\[(?:Organism|scientific name)\])?\s*$', organism_query)
     species_name = organism_query
     if name_match:
@@ -228,7 +215,6 @@ def fetch_assembly_data(organism_query, logger):
         filtered_query = f"txid{taxid}[Organism] AND \"latest\"[Filter]"
     else:
         cleaned_query = re.sub(r'\s*\(.*\)\s*', '', organism_query).strip()
-        # ensure the query is quoted and uses the Organism tag
         if not cleaned_query.startswith('"'):
             cleaned_query = f'"{cleaned_query}"[Organism]'
         filtered_query = f'{cleaned_query} AND "latest"[Filter]'
@@ -291,9 +277,12 @@ def download_file_and_unzip(url, output_dir, logger, max_retries=3):
     filename = os.path.join(output_dir, os.path.basename(url))
     final_filename = filename.removesuffix('.gz')
 
-    if os.path.exists(final_filename):
-        logger.info(f"File already exists: {final_filename}")
+    if os.path.exists(final_filename) and os.path.getsize(final_filename) > 0:
+        logger.info(f"File already exists and is unzipped: {final_filename}. Skipping download.")
         return final_filename
+
+    if os.path.exists(filename):
+        os.remove(filename) 
 
     for attempt in range(max_retries):
         try:
@@ -316,54 +305,31 @@ def download_file_and_unzip(url, output_dir, logger, max_retries=3):
                 logger.error(f"All download attempts failed for {url}.")
     return None
 
-
-
-
 # ==============================
-# INDIA FILTER (SAFE / NO WARNINGS)
+# MODULAR REGIONAL FILTER
 # ==============================
 
-def filter_for_india(df, logger):
-    indian_cities = [
-        "IND", "Indian", "india", "India",
-        "Agartala", "Ahmedabad", "Aizawl", "Ajmer", "Allahabad", "Amritsar",
-        "Anand", "Avikanagar", "Aurangabad", "Amravati", "Bangalore",
-        "Bareilly", "Batinda", "Belgavi", "Banglore", "Bengaluru", "Bhopal",
-        "Berhampur", "Bhagalpur", "Bhilai", "Bhubaneswar", "Bhubaneshwar",
-        "Bilaspur", "Bibinagar", "Calicut", "Chandigarh", "Chennai", "Cochin",
-        "Dehradun", "Deoghar", "Delhi", "Dindigul", "Dhanbad", "Durgapur",
-        "Faridabad", "Gangtok", "Gandhinagar", "Goa", "Greater Noida",
-        "Gorakhpur", "Gurugram", "Guwahati", "Hyderabad", "Telangana", "Imphal",
-        "Indore", "Itanagar", "Jaipur", "Jabalpur", "Jammu", "Jamshedpur",
-        "Jalandhar", "Jodhpur", "Jorhat", "Kalaburagi", "Kalpakkam", "Kerala",
-        "Kalyani", "Kanpur", "Karnal", "Kangra", "Kannur", "Kashipur", "Kochi",
-        "Kolkata", "Kolkata, Hindupur", "Leh", "Lucknow", "Malda", "Manesar",
-        "Manipur", "Mangalagiri", "Mandi", "Mumbai", "Mysuru", "Nagpur",
-        "Nadiad", "Nellore", "Navi Mumbai", "New Delhi", "Noida", "Patiala",
-        "Pilani", "Puducherry", "Pune", "Prayagraj", "Bareli", "Raichur",
-        "Raipur", "Rajendranagar", "Rajkot", "Rishikesh", "Rohtak", "Roorkee",
-        "Ropar", "Rourkela", "Sambalpur", "Secunderabad", "Sikkim", "Shibpur",
-        "Shillong", "Shimla", "Silchar", "Sonepat", "Sri City", "Srinagar",
-        "Surat", "Tadepalligudem", "Tezpur", "Thiruvananthapuram",
-        "Thiruvananthapura", "Tiruchirappalli", "Tirupati", "Trichy",
-        "Tuljapur", "Udaipur", "Una", "Vadodara", "Varanasi", "Vijayawada",
-        "Visakhapatnam", "Warangal", "Yupia", "RCB", "ICMR", "IMTECH", "CSIR",
-        "SPPU", "IIT", "NIT", "IISC", "IIIT", "Central of University", "IGIB",
-        "ICGEB", "CDRI", "SRM", "AIIMS"
-    ]
+def filter_by_region(df, logger, keywords):
+    """
+    Filters NCBI metadata based on a user-provided list of regional keywords 
+    (e.g., country names, cities, or research institutions) mapped in the YAML config.
+    """
+    if not keywords:
+        logger.warning("Regional filter requested but 'regional_keywords' list in config is empty. Returning all assemblies.")
+        return df
 
-    logger.info("Filtering for assemblies submitted from India.")
+    logger.info(f"Applying regional metadata filter using {len(keywords)} keywords...")
     if df.empty:
         return df
 
-    # non-capturing group for safety
-    pattern_str = r"\b(?:" + "|".join(map(re.escape, indian_cities)) + r")\b"
-
+    # Build regex to search for any of the user-defined keywords
+    pattern_str = r"\b(?:" + "|".join(map(re.escape, keywords)) + r")\b"
     mask = df["SubmitterOrganization"].fillna("").str.contains(
         pattern_str, case=False, regex=True
     )
     filtered_df = df[mask].copy()
-    logger.info(f"Found {len(filtered_df)} assemblies matching the India filter.")
+    
+    logger.info(f"Found {len(filtered_df)} assemblies matching the regional criteria.")
     return filtered_df
 
 
@@ -372,42 +338,35 @@ def filter_for_india(df, logger):
 # ==============================
 
 def download_assemblies(filtered_df, output_dir, group, num_assemblies, logger):
-    """
-    Try to download assemblies from filtered_df until we reach the requested number
-    of *successful* downloads (num_assemblies), or we run out of candidates, or
-    the user chooses to stop.
-
-    If a download fails, the user is informed and asked whether to try the next
-    accession in the list.
-    """
     successful_accessions = []
-
     assembly_ids = filtered_df["AssemblyAccession"].tolist()
     if not assembly_ids:
         logger.warning("No assembly accessions available to download.")
         return successful_accessions
 
     total_candidates = len(assembly_ids)
-    # num_assemblies is an upper bound on successful downloads
-    desired_successes = total_candidates if num_assemblies is None else min(
-        num_assemblies, total_candidates
-    )
+    desired_successes = total_candidates if num_assemblies is None else min(num_assemblies, total_candidates)
 
-    logger.info(
-        f"Attempting to download up to {desired_successes} assemblies "
-        f"out of {total_candidates} candidate assemblies."
-    )
+    logger.info(f"Ensuring {desired_successes} successful assemblies are present (out of {total_candidates} candidates).")
 
-    with tqdm(total=desired_successes, desc="Successfully downloaded assemblies") as pbar:
+    with tqdm(total=desired_successes, desc="Successfully retrieved assemblies") as pbar:
         idx = 0
         while idx < total_candidates and len(successful_accessions) < desired_successes:
             accession = assembly_ids[idx]
             idx += 1
 
+            final_fna = os.path.join(output_dir, f"{accession}.fna")
+            pattern = os.path.join(output_dir, f"**/{accession}*.fna.gz")
+            if os.path.exists(final_fna) or glob.glob(pattern, recursive=True):
+                logger.info(f"Assembly {accession} already present locally. Skipping download.")
+                successful_accessions.append(accession)
+                pbar.update(1)
+                continue
+
             source = "refseq" if accession.startswith("GCF") else "genbank"
             command = (
                 f"ncbi-genome-download -s {source} -F fasta -o {output_dir} "
-                f"-p {os.cpu_count()} all --assembly-accessions {accession}"
+                f"-p {os.cpu_count()} {group}  --assembly-accessions {accession}"
             )
 
             try:
@@ -425,63 +384,44 @@ def download_assemblies(filtered_df, output_dir, group, num_assemblies, logger):
                 remaining_needed = desired_successes - len(successful_accessions)
 
                 if remaining_candidates <= 0 or remaining_needed <= 0:
-                    logger.warning(
-                        "No more candidate assemblies available to try after download failure."
-                    )
+                    logger.warning("No more candidate assemblies available to try after download failure.")
                     break
 
                 print()
+                print(colored(f"Download failed for accession: {accession}", "red", attrs=["bold"]))
                 print(colored(
-                    f"Download failed for accession: {accession}",
-                    "red",
-                    attrs=["bold"]
+                    f"You requested {desired_successes} assemblies, currently have {len(successful_accessions)} successful.\n"
+                    f"There are {remaining_candidates} more candidate assemblies available in the metadata.", "yellow"
                 ))
-                print(colored(
-                    f"You requested {desired_successes} assemblies, "
-                    f"currently have {len(successful_accessions)} successful.\n"
-                    f"There are {remaining_candidates} more candidate assemblies available "
-                    f"in the metadata.",
-                    "yellow"
-                ))
-                choice = input(colored(
-                    "Do you want to try the next accession to reach the requested number? [y/N]: ",
-                    "cyan",
-                    attrs=["bold"]
-                )).strip().lower()
+                choice = input(colored("Do you want to try the next accession? [y/N]: ", "cyan", attrs=["bold"])).strip().lower()
 
                 if choice not in ("y", "yes"):
-                    logger.warning(
-                        f"User chose to stop after {len(successful_accessions)} successful downloads "
-                        f"(requested {desired_successes})."
-                    )
+                    logger.warning(f"User chose to stop after {len(successful_accessions)} successful downloads.")
                     break
                 else:
-                    logger.info(
-                        f"User chose to continue; attempting next accession "
-                        f"({remaining_needed} more successful downloads desired)."
-                    )
+                    logger.info(f"User chose to continue; attempting next accession ({remaining_needed} more needed).")
 
     if len(successful_accessions) < desired_successes:
-        logger.warning(
-            f"Only {len(successful_accessions)} assemblies were successfully downloaded "
-            f"out of requested {desired_successes}."
-        )
+        logger.warning(f"Only {len(successful_accessions)} assemblies were successfully retrieved out of {desired_successes}.")
     else:
-        logger.info(
-            f"Successfully downloaded the requested number of assemblies: "
-            f"{len(successful_accessions)}."
-        )
+        logger.info(f"Successfully secured the requested number of assemblies: {len(successful_accessions)}.")
 
     return successful_accessions
 
-
 def decompress_and_rename_assemblies(assembly_dir, accessions, logger):
     for accession in accessions:
+        new_file = os.path.join(assembly_dir, f"{accession}.fna")
+        
+        if os.path.exists(new_file) and os.path.getsize(new_file) > 0:
+            logger.info(f"Assembly {accession} is already decompressed and renamed.")
+            continue
+
         pattern = os.path.join(assembly_dir, f"**/{accession}*.fna.gz")
         files = glob.glob(pattern, recursive=True)
         if not files:
             logger.warning(f"No FASTA file found for {accession}")
             continue
+            
         for file in files:
             run_command_logged(
                 f"gunzip -f {file}",
@@ -489,16 +429,9 @@ def decompress_and_rename_assemblies(assembly_dir, accessions, logger):
                 error_message=f"Failed to decompress {file}"
             )
             decompressed_file = file.removesuffix('.gz')
-            new_file = os.path.join(assembly_dir, f"{accession}.fna")
             shutil.move(decompressed_file, new_file)
 
-
-# --- NEW FUNCTION TO FIX FASTA HEADERS ---
 def fix_fasta_headers(assembly_dir, accessions, logger):
-    """
-    Simplifies FASTA headers to only the first word (e.g., >CP12345.1)
-    This prevents header mismatch errors in downstream tools like GeneMark.
-    """
     logger.info("Simplifying FASTA headers to first word only.")
     for accession in accessions:
         fasta_file = os.path.join(assembly_dir, f"{accession}.fna")
@@ -507,7 +440,6 @@ def fix_fasta_headers(assembly_dir, accessions, logger):
             continue
 
         temp_file = f"{fasta_file}.tmp"
-
         try:
             with open(fasta_file, 'r') as infile, open(temp_file, 'w') as outfile:
                 for line in infile:
@@ -527,8 +459,17 @@ def fix_fasta_headers(assembly_dir, accessions, logger):
 # PIPELINE STAGE FUNCTIONS
 # ==============================
 
-def run_quast(accessions, assembly_dir, quast_dir, ref_genome, gff_genome,
-              threads, quast_params, logger):
+def run_quast(accessions, assembly_dir, quast_dir, ref_genome, gff_genome, threads, quast_params, logger):
+    quast_report = os.path.join(quast_dir, "report.tsv")
+    
+    if os.path.exists(quast_report) and os.path.getsize(quast_report) > 0:
+        logger.info(f"QUAST outputs found at {quast_dir}. Skipping QUAST step.")
+        return
+    if os.path.exists(quast_dir):
+        logger.info(f"Incomplete QUAST output found. Cleaning up {quast_dir}.")
+        shutil.rmtree(quast_dir)
+        
+    os.makedirs(quast_dir, exist_ok=True)
     assembly_files = [os.path.join(assembly_dir, f"{acc}.fna") for acc in accessions]
     quast_cmd = (
         f"quast.py {' '.join(assembly_files)} "
@@ -541,6 +482,15 @@ def run_prokka(accessions, assembly_dir, prokka_dir, kingdom, prokka_params, log
     for accession in accessions:
         input_fasta = os.path.join(assembly_dir, f"{accession}.fna")
         output_prefix = os.path.join(prokka_dir, accession)
+        expected_out = os.path.join(output_prefix, f"{accession}.faa")
+
+        if os.path.exists(expected_out) and os.path.getsize(expected_out) > 0:
+            logger.info(f"Prokka outputs found for {accession}. Skipping Prokka step.")
+            continue
+        if os.path.exists(output_prefix):
+            logger.info(f"Incomplete Prokka output found for {accession}. Cleaning up {output_prefix}.")
+            shutil.rmtree(output_prefix)
+
         prokka_cmd = (
             f"prokka --kingdom {kingdom} --outdir {output_prefix} --prefix {accession} "
             f"{format_params(prokka_params)} {input_fasta}"
@@ -548,6 +498,12 @@ def run_prokka(accessions, assembly_dir, prokka_dir, kingdom, prokka_params, log
         run_command_logged(prokka_cmd, logger, error_message=f"Prokka failed for {accession}")
 
 def run_repeat_modeling(accession_dir, genome_path, cpus, logger):
+    masked_genome_path = f"{genome_path}.masked"
+    
+    if os.path.exists(masked_genome_path) and os.path.getsize(masked_genome_path) > 0:
+        logger.info(f"Masked genome already exists at {masked_genome_path}. Skipping RepeatModeler/RepeatMasker.")
+        return masked_genome_path
+
     logger.info("Stage 6.1: Building RepeatModeler database.")
     run_command_logged(
         f"BuildDatabase -name genome_db \"{genome_path}\"",
@@ -562,35 +518,18 @@ def run_repeat_modeling(accession_dir, genome_path, cpus, logger):
         error_message="RepeatModeler failed."
     )
 
-    rm_dirs = [
-        d for d in os.listdir(accession_dir)
-        if d.startswith("RM_") and os.path.isdir(os.path.join(accession_dir, d))
-    ]
+    rm_dirs = [d for d in os.listdir(accession_dir) if d.startswith("RM_") and os.path.isdir(os.path.join(accession_dir, d))]
     if not rm_dirs:
         logger.error("FATAL: RepeatModeler did not create an output directory.")
         sys.exit(1)
 
-    latest_rm_dir = max(
-        rm_dirs,
-        key=lambda d: os.path.getmtime(os.path.join(accession_dir, d))
-    )
-    repeat_lib_path = os.path.abspath(
-        os.path.join(accession_dir, latest_rm_dir, "consensi.fa.classified")
-    )
+    latest_rm_dir = max(rm_dirs, key=lambda d: os.path.getmtime(os.path.join(accession_dir, d)))
+    repeat_lib_path = os.path.abspath(os.path.join(accession_dir, latest_rm_dir, "consensi.fa.classified"))
 
     logger.info("Stage 6.2: Running RepeatMasker to mask the genome.")
-    repeatmasker_cmd = (
-        f"RepeatMasker -engine ncbi -lib \"{repeat_lib_path}\" -pa {cpus} "
-        f"-gff -xsmall \"{genome_path}\""
-    )
-    run_command_logged(
-        repeatmasker_cmd,
-        logger,
-        cwd=accession_dir,
-        error_message="RepeatMasker failed."
-    )
+    repeatmasker_cmd = (f"RepeatMasker -engine ncbi -lib \"{repeat_lib_path}\" -pa {cpus} -gff -xsmall \"{genome_path}\"")
+    run_command_logged(repeatmasker_cmd, logger, cwd=accession_dir, error_message="RepeatMasker failed.")
 
-    masked_genome_path = f"{genome_path}.masked"
     if not os.path.exists(masked_genome_path):
         logger.error(f"FATAL: Masked genome not created at {masked_genome_path}")
         sys.exit(1)
@@ -598,20 +537,11 @@ def run_repeat_modeling(accession_dir, genome_path, cpus, logger):
     logger.info(f"Successfully created masked genome: {masked_genome_path}")
     return masked_genome_path
 
-
-# ==============================
-# BRAKER3 (EK) PIPELINE
-# ==============================
-
 def run_braker_for_accession(accession, config, assembly_dir, braker_output_dir,
-                             protein_evidence_path, logger):
-    """
-    Run BRAKER3 inside the official Docker image with robust handling for missing ProtHint outputs.
+                             protein_evidence_path, logger, braker_cache=None):
+    if braker_cache is None:
+        braker_cache = {}
 
-    - EP mode: protein only (ProtHint or precomputed hints)
-    - ET mode: RNA-Seq only (SRA / FASTQ / BAM / hints)
-    - ETP mode: protein + RNA-Seq (native BRAKER3 / GeneMark-ETP mode)
-    """
     logger.info(colored(
         f"--- Starting Eukaryotic Annotation with BRAKER3 (Docker) for {accession} ---",
         "green"
@@ -626,12 +556,22 @@ def run_braker_for_accession(accession, config, assembly_dir, braker_output_dir,
     accession_out_dir = os.path.abspath(
         os.path.join(braker_output_dir, accession)
     )
+    
+    expected_braker_output = os.path.join(accession_out_dir, "braker.aa")
+    
+    if os.path.exists(expected_braker_output) and os.path.getsize(expected_braker_output) > 0:
+        logger.info(f"BRAKER3 outputs found for {accession}. Skipping BRAKER3 annotation.")
+        return
+        
+    if os.path.exists(accession_out_dir):
+        logger.info(f"Incomplete BRAKER3 output for {accession}. Cleaning up {accession_out_dir}.")
+        shutil.rmtree(accession_out_dir)
+    
     os.makedirs(accession_out_dir, exist_ok=True)
 
     braker_params = config.get('braker_params', {})
     cpus = int(braker_params.get('cpus', 1))
 
-    # Repeat modeling & masking
     masked_genome_path = run_repeat_modeling(
         os.path.dirname(original_genome_path),
         original_genome_path,
@@ -639,20 +579,27 @@ def run_braker_for_accession(accession, config, assembly_dir, braker_output_dir,
         logger
     )
 
-    # --- MODE SELECTION ---
-    print(colored("\n" + "=" * 50, "cyan"))
-    print(colored(f"BRAKER3 MODE SELECTION for {accession}", "cyan", attrs=["bold"]))
-    print("Please choose the BRAKER mode to run:")
-    print("  [1] EP Mode (Protein evidence only)")
-    print("  [2] ET Mode (Transcriptome evidence only)")
-    print("  [3] ETP Mode (Protein AND Transcriptome evidence)")
-    mode_choice = ""
-    while mode_choice not in ["1", "2", "3"]:
-        mode_choice = input(colored(
-            "Enter your choice (1, 2, or 3): ",
-            "white",
-            attrs=["bold"]
-        ))
+    # ----------------------------------------------------
+    # MODE SELECTION (With Caching)
+    # ----------------------------------------------------
+    if "mode" in braker_cache:
+        mode_choice = braker_cache["mode"]
+        print(colored(f"\n[Auto-applying cached BRAKER Mode for {accession}: {mode_choice}]", "yellow", attrs=["bold"]))
+    else:
+        print(colored("\n" + "=" * 50, "cyan"))
+        print(colored(f"BRAKER3 MODE SELECTION for {accession}", "cyan", attrs=["bold"]))
+        print("Please choose the BRAKER mode to run:")
+        print("  [1] EP Mode (Protein evidence only)")
+        print("  [2] ET Mode (Transcriptome evidence only)")
+        print("  [3] ETP Mode (Protein AND Transcriptome evidence)")
+        mode_choice = ""
+        while mode_choice not in ["1", "2", "3"]:
+            mode_choice = input(colored(
+                "Enter your choice (1, 2, or 3): ",
+                "white",
+                attrs=["bold"]
+            ))
+        braker_cache["mode"] = mode_choice
 
     braker_args = [
         "braker.pl",
@@ -670,256 +617,329 @@ def run_braker_for_accession(accession, config, assembly_dir, braker_output_dir,
     if extra_params_dict:
         braker_args.append(format_params(extra_params_dict))
 
-    # -----------------------
-    # EP MODE
-    # -----------------------
+    # ====================================================
+    # EP MODE (1)
+    # ====================================================
     if mode_choice == "1":
         logger.info("Configuring EP Mode (Protein only)...")
-        print("\n" + "-" * 50)
-        print(colored("Protein evidence for EP mode:", "cyan"))
+        
+        if "prot_path" in braker_cache:
+            protein_path_to_use = braker_cache["prot_path"]
+            print(colored(f"[Using cached Protein FASTA: {protein_path_to_use}]", "yellow"))
+        else:
+            print("\n" + "-" * 50)
+            print(colored("Protein evidence for EP mode:", "cyan"))
 
-        default_protein = protein_evidence_path or braker_params.get('protein_evidence')
-        if default_protein:
-            default_protein = os.path.abspath(default_protein)
-            print(f"  [1] Use protein file from config: {default_protein}")
-            print("  [2] Enter a different protein FASTA")
-            choice = ""
-            while choice not in ["1", "2"]:
-                choice = input(colored(
-                    "Choose protein input (1/2): ",
+            default_protein = protein_evidence_path or braker_params.get('protein_evidence')
+            if default_protein:
+                default_protein = os.path.abspath(default_protein)
+                print(f"  [1] Use protein file from config: {default_protein}")
+                print("  [2] Enter a different protein FASTA")
+                choice = ""
+                while choice not in ["1", "2"]:
+                    choice = input(colored(
+                        "Choose protein input (1/2): ",
+                        "white",
+                        attrs=["bold"]
+                    ))
+                if choice == "1":
+                    protein_path_to_use = default_protein
+                else:
+                    protein_path_to_use = ""
+            else:
+                print("  No protein_evidence in config; you must provide a protein FASTA.")
+                protein_path_to_use = ""
+
+            while not protein_path_to_use or not os.path.exists(protein_path_to_use):
+                protein_path_to_use = input(colored(
+                    "Enter FULL path to your protein.fa: ",
+                    "white"
+                ))
+                if not os.path.exists(protein_path_to_use):
+                    logger.error(f"File not found: {protein_path_to_use}")
+
+            protein_path_to_use = os.path.abspath(protein_path_to_use)
+            logger.info(f"Using EP protein evidence file: {protein_path_to_use}")
+            print(colored(f"Using protein FASTA: {protein_path_to_use}", "yellow"))
+            print("-" * 50)
+            braker_cache["prot_path"] = protein_path_to_use
+
+        if "prot_choice" in braker_cache:
+            prot_choice = braker_cache["prot_choice"]
+        else:
+            print(colored("Protein Evidence Input:", "cyan"))
+            print("  [1] Let ProtHint run inside BRAKER (recommended for EP).")
+            print("  [2] Use a pre-computed ProtHint hints file (.gff) instead of running ProtHint.")
+            prot_choice = ""
+            while prot_choice not in ["1", "2"]:
+                prot_choice = input(colored(
+                    "Enter your choice (1 or 2): ",
                     "white",
                     attrs=["bold"]
                 ))
-            if choice == "1":
-                protein_path_to_use = default_protein
-            else:
-                protein_path_to_use = ""
-        else:
-            print("  No protein_evidence in config; you must provide a protein FASTA.")
-            protein_path_to_use = ""
-
-        while not protein_path_to_use or not os.path.exists(protein_path_to_use):
-            protein_path_to_use = input(colored(
-                "Enter FULL path to your protein.fa: ",
-                "white"
-            ))
-            if not os.path.exists(protein_path_to_use):
-                logger.error(f"File not found: {protein_path_to_use}")
-
-        protein_path_to_use = os.path.abspath(protein_path_to_use)
-        logger.info(f"Using EP protein evidence file: {protein_path_to_use}")
-
-        print(colored(f"Using protein FASTA: {protein_path_to_use}", "yellow"))
-        print("-" * 50)
-
-        print(colored("Protein Evidence Input:", "cyan"))
-        print("  [1] Let ProtHint run inside BRAKER (recommended for EP).")
-        print("  [2] Use a pre-computed ProtHint hints file (.gff) instead of running ProtHint.")
-        prot_choice = ""
-        while prot_choice not in ["1", "2"]:
-            prot_choice = input(colored(
-                "Enter your choice (1 or 2): ",
-                "white",
-                attrs=["bold"]
-            ))
+            braker_cache["prot_choice"] = prot_choice
 
         if prot_choice == "1":
             braker_args.append(f"--prot_seq={protein_path_to_use}")
         else:
-            hints_file = ""
-            while not os.path.exists(hints_file):
-                hints_file = input(colored(
-                    "Enter the FULL path to your prothint_augustus.gff: ",
-                    "white"
-                ))
-                if not os.path.exists(hints_file):
-                    logger.error(f"File not found: {hints_file}")
+            if "hints_file" in braker_cache:
+                hints_file = braker_cache["hints_file"]
+            else:
+                hints_file = ""
+                while not os.path.exists(hints_file):
+                    hints_file = input(colored(
+                        "Enter the FULL path to your prothint_augustus.gff: ",
+                        "white"
+                    ))
+                    if not os.path.exists(hints_file):
+                        logger.error(f"File not found: {hints_file}")
+                braker_cache["hints_file"] = hints_file
             braker_args.append(f"--hints={os.path.abspath(hints_file)}")
 
-    # -----------------------
-    # ET MODE
-    # -----------------------
+    # ====================================================
+    # ET MODE (2)
+    # ====================================================
     elif mode_choice == "2":
         logger.info("Configuring ET Mode (Transcriptome only)...")
-        print("\n" + "-" * 50)
-        print(colored("RNA-Seq Data Input Method:", "cyan"))
-        print("  [1] SRA IDs (auto-download)")
-        print("  [2] Local FASTQ files")
-        print("  [3] Local BAM files")
-        print("  [4] Pre-computed hints file (.gff)")
-        rna_choice = ""
-        while rna_choice not in ["1", "2", "3", "4"]:
-            rna_choice = input(colored(
-                "Enter your choice (1-4): ",
-                "white",
-                attrs=["bold"]
-            ))
-
-        if rna_choice == "1":
-            sra_ids = input(colored(
-                "Enter SRA IDs (comma-separated): ",
-                "white"
-            ))
-            braker_args.append(f"--rnaseq_sets_ids={sra_ids}")
-
-        elif rna_choice == "2":
-            sra_ids = input(colored(
-                "Enter library IDs (e.g., SRA_ID1,SRA_ID2): ",
-                "white"
-            ))
-            fastq_dir = ""
-            while not os.path.isdir(fastq_dir):
-                fastq_dir = input(colored(
-                    "Enter path to directory containing FASTQs: ",
-                    "white"
-                ))
-                if not os.path.isdir(fastq_dir):
-                    logger.error(f"Directory not found: {fastq_dir}")
-            braker_args.append(f"--rnaseq_sets_ids={sra_ids}")
-            braker_args.append(f"--rnaseq_sets_dirs={os.path.abspath(fastq_dir)}")
-
-        elif rna_choice == "3":
-            bam_files_str = input(colored(
-                "Enter FULL paths to BAM files (comma-separated): ",
-                "white"
-            ))
-            bam_files = [os.path.abspath(f.strip()) for f in bam_files_str.split(',')]
-            for f in bam_files:
-                if not os.path.exists(f):
-                    logger.error(f"BAM file not found: {f}")
-                    sys.exit(1)
-            braker_args.append(f"--bam={','.join(bam_files)}")
-
-        elif rna_choice == "4":
-            hints_file = ""
-            while not os.path.exists(hints_file):
-                hints_file = input(colored(
-                    "Enter FULL path to RNA-Seq hints.gff: ",
-                    "white"
-                ))
-                if not os.path.exists(hints_file):
-                    logger.error(f"File not found: {hints_file}")
-            braker_args.append(f"--hints={os.path.abspath(hints_file)}")
-
-    # -----------------------
-    # ETP MODE
-    # -----------------------
-    else:
-        logger.info("Configuring ETP Mode (Protein + Transcriptome)...")
-
-        default_protein = protein_evidence_path or braker_params.get('protein_evidence')
-        print("\n" + "-" * 50)
-        print(colored("Protein evidence for ETP mode:", "cyan"))
-
-        if default_protein:
-            default_protein = os.path.abspath(default_protein)
-            print(f"  [1] Use protein file from config: {default_protein}")
-            print("  [2] Enter a different protein FASTA")
-            choice = ""
-            while choice not in ["1", "2"]:
-                choice = input(colored(
-                    "Choose protein input (1/2): ",
+        
+        if "rna_choice" in braker_cache:
+            rna_choice = braker_cache["rna_choice"]
+            print(colored(f"[Using cached RNA Source Input Mode: {rna_choice}]", "yellow"))
+        else:
+            print("\n" + "-" * 50)
+            print(colored("RNA-Seq Data Input Method:", "cyan"))
+            print("  [1] SRA IDs (auto-download)")
+            print("  [2] Local FASTQ files")
+            print("  [3] Local BAM files")
+            print("  [4] Pre-computed hints file (.gff)")
+            rna_choice = ""
+            while rna_choice not in ["1", "2", "3", "4"]:
+                rna_choice = input(colored(
+                    "Enter your choice (1-4): ",
                     "white",
                     attrs=["bold"]
                 ))
-            if choice == "1":
-                protein_path_to_use = default_protein
-            else:
-                protein_path_to_use = ""
-        else:
-            print("  No protein_evidence in config; you must provide a protein FASTA.")
-            protein_path_to_use = ""
-
-        while not protein_path_to_use or not os.path.exists(protein_path_to_use):
-            protein_path_to_use = input(colored(
-                "Enter FULL path to your protein.fa: ",
-                "white"
-            ))
-            if not os.path.exists(protein_path_to_use):
-                logger.error(f"File not found: {protein_path_to_use}")
-
-        protein_path_to_use = os.path.abspath(protein_path_to_use)
-        logger.info(f"Using ETP protein evidence file: {protein_path_to_use}")
-        print(colored(f"Using protein FASTA for ETP: {protein_path_to_use}", "yellow"))
-        print("-" * 50)
-
-        braker_args.append(f"--prot_seq={protein_path_to_use}")
-
-        print(colored("RNA-Seq Data Input Method:", "cyan"))
-        print("  [1] SRA IDs (auto-download)")
-        print("  [2] Local FASTQ files")
-        print("  [3] Local BAM files")
-        rna_choice = ""
-        while rna_choice not in ["1", "2", "3"]:
-            rna_choice = input(colored(
-                "Enter your choice (1-3): ",
-                "white",
-                attrs=["bold"]
-            ))
+            braker_cache["rna_choice"] = rna_choice
 
         if rna_choice == "1":
-            sra_ids = input(colored(
-                "Enter SRA IDs (comma-separated): ",
-                "white"
-            ))
+            if "sra_ids" in braker_cache:
+                sra_ids = braker_cache["sra_ids"]
+                print(colored(f"[Using cached SRA IDs: {sra_ids}]", "yellow"))
+            else:
+                sra_ids = input(colored(
+                    "Enter SRA IDs (comma-separated): ",
+                    "white"
+                ))
+                braker_cache["sra_ids"] = sra_ids
             braker_args.append(f"--rnaseq_sets_ids={sra_ids}")
 
         elif rna_choice == "2":
-            sra_ids = input(colored(
-                "Enter library IDs (e.g., SRA_ID1,SRA_ID2): ",
-                "white"
-            ))
-            fastq_dir = ""
-            while not os.path.isdir(fastq_dir):
-                fastq_dir = input(colored(
-                    "Enter path to directory containing FASTQs: ",
+            if "sra_ids" in braker_cache:
+                sra_ids = braker_cache["sra_ids"]
+                print(colored(f"[Using cached Library IDs: {sra_ids}]", "yellow"))
+            else:
+                sra_ids = input(colored(
+                    "Enter library IDs (e.g., SRA_ID1,SRA_ID2): ",
                     "white"
                 ))
-                if not os.path.isdir(fastq_dir):
-                    logger.error(f"Directory not found: {fastq_dir}")
+                braker_cache["sra_ids"] = sra_ids
+                
+            if "fastq_dir" in braker_cache:
+                fastq_dir = braker_cache["fastq_dir"]
+                print(colored(f"[Using cached FASTQ Dir: {fastq_dir}]", "yellow"))
+            else:
+                fastq_dir = ""
+                while not os.path.isdir(fastq_dir):
+                    fastq_dir = input(colored(
+                        "Enter path to directory containing FASTQs: ",
+                        "white"
+                    ))
+                    if not os.path.isdir(fastq_dir):
+                        logger.error(f"Directory not found: {fastq_dir}")
+                braker_cache["fastq_dir"] = fastq_dir
             braker_args.append(f"--rnaseq_sets_ids={sra_ids}")
             braker_args.append(f"--rnaseq_sets_dirs={os.path.abspath(fastq_dir)}")
 
         elif rna_choice == "3":
-            bam_files_str = input(colored(
-                "Enter FULL paths to BAM files (comma-separated): ",
-                "white"
-            ))
-            bam_files = [os.path.abspath(f.strip()) for f in bam_files_str.split(',')]
-            for f in bam_files:
-                if not os.path.exists(f):
-                    logger.error(f"BAM file not found: {f}")
-                    sys.exit(1)
+            if "bam_files" in braker_cache:
+                bam_files = braker_cache["bam_files"]
+                print(colored(f"[Using cached BAM files: {bam_files}]", "yellow"))
+            else:
+                bam_files_str = input(colored(
+                    "Enter FULL paths to BAM files (comma-separated): ",
+                    "white"
+                ))
+                bam_files = [os.path.abspath(f.strip()) for f in bam_files_str.split(',')]
+                for f in bam_files:
+                    if not os.path.exists(f):
+                        logger.error(f"BAM file not found: {f}")
+                        sys.exit(1)
+                braker_cache["bam_files"] = bam_files
             braker_args.append(f"--bam={','.join(bam_files)}")
 
-    # AUGUSTUS config path
-    augustus_cfg = os.environ.get(
-        "AUGUSTUS_CONFIG_PATH",
-        os.path.expanduser("~/augustus_config")
-    )
-    if not os.path.isdir(augustus_cfg):
-        logger.error(f"FATAL: AUGUSTUS config dir not found at {augustus_cfg}.")
-        sys.exit(1)
+        elif rna_choice == "4":
+            if "rna_hints_file" in braker_cache:
+                hints_file = braker_cache["rna_hints_file"]
+                print(colored(f"[Using cached Hints File: {hints_file}]", "yellow"))
+            else:
+                hints_file = ""
+                while not os.path.exists(hints_file):
+                    hints_file = input(colored(
+                        "Enter FULL path to RNA-Seq hints.gff: ",
+                        "white"
+                    ))
+                    if not os.path.exists(hints_file):
+                        logger.error(f"File not found: {hints_file}")
+                braker_cache["rna_hints_file"] = hints_file
+            braker_args.append(f"--hints={os.path.abspath(hints_file)}")
 
+    # ====================================================
+    # ETP MODE (3)
+    # ====================================================
+    else:
+        logger.info("Configuring ETP Mode (Protein + Transcriptome)...")
+
+        # PROTEIN PART
+        if "prot_path" in braker_cache:
+            protein_path_to_use = braker_cache["prot_path"]
+            print(colored(f"[Using cached ETP protein FASTA: {protein_path_to_use}]", "yellow"))
+        else:
+            default_protein = protein_evidence_path or braker_params.get('protein_evidence')
+            print("\n" + "-" * 50)
+            print(colored("Protein evidence for ETP mode:", "cyan"))
+
+            if default_protein:
+                default_protein = os.path.abspath(default_protein)
+                print(f"  [1] Use protein file from config: {default_protein}")
+                print("  [2] Enter a different protein FASTA")
+                choice = ""
+                while choice not in ["1", "2"]:
+                    choice = input(colored(
+                        "Choose protein input (1/2): ",
+                        "white",
+                        attrs=["bold"]
+                    ))
+                if choice == "1":
+                    protein_path_to_use = default_protein
+                else:
+                    protein_path_to_use = ""
+            else:
+                print("  No protein_evidence in config; you must provide a protein FASTA.")
+                protein_path_to_use = ""
+
+            while not protein_path_to_use or not os.path.exists(protein_path_to_use):
+                protein_path_to_use = input(colored(
+                    "Enter FULL path to your protein.fa: ",
+                    "white"
+                ))
+                if not os.path.exists(protein_path_to_use):
+                    logger.error(f"File not found: {protein_path_to_use}")
+
+            protein_path_to_use = os.path.abspath(protein_path_to_use)
+            logger.info(f"Using ETP protein evidence file: {protein_path_to_use}")
+            print(colored(f"Using protein FASTA for ETP: {protein_path_to_use}", "yellow"))
+            print("-" * 50)
+            braker_cache["prot_path"] = protein_path_to_use
+
+        braker_args.append(f"--prot_seq={protein_path_to_use}")
+
+        # RNA-SEQ PART
+        if "rna_choice" in braker_cache:
+            rna_choice = braker_cache["rna_choice"]
+            print(colored(f"[Using cached RNA Source Input Mode: {rna_choice}]", "yellow"))
+        else:
+            print(colored("RNA-Seq Data Input Method:", "cyan"))
+            print("  [1] SRA IDs (auto-download)")
+            print("  [2] Local FASTQ files")
+            print("  [3] Local BAM files")
+            rna_choice = ""
+            while rna_choice not in ["1", "2", "3"]:
+                rna_choice = input(colored(
+                    "Enter your choice (1-3): ",
+                    "white",
+                    attrs=["bold"]
+                ))
+            braker_cache["rna_choice"] = rna_choice
+
+        if rna_choice == "1":
+            if "sra_ids" in braker_cache:
+                sra_ids = braker_cache["sra_ids"]
+                print(colored(f"[Using cached SRA IDs: {sra_ids}]", "yellow"))
+            else:
+                sra_ids = input(colored(
+                    "Enter SRA IDs (comma-separated): ",
+                    "white"
+                ))
+                braker_cache["sra_ids"] = sra_ids
+            braker_args.append(f"--rnaseq_sets_ids={sra_ids}")
+
+        elif rna_choice == "2":
+            if "sra_ids" in braker_cache:
+                sra_ids = braker_cache["sra_ids"]
+                print(colored(f"[Using cached Library IDs: {sra_ids}]", "yellow"))
+            else:
+                sra_ids = input(colored(
+                    "Enter library IDs (e.g., SRA_ID1,SRA_ID2): ",
+                    "white"
+                ))
+                braker_cache["sra_ids"] = sra_ids
+                
+            if "fastq_dir" in braker_cache:
+                fastq_dir = braker_cache["fastq_dir"]
+                print(colored(f"[Using cached FASTQ Dir: {fastq_dir}]", "yellow"))
+            else:
+                fastq_dir = ""
+                while not os.path.isdir(fastq_dir):
+                    fastq_dir = input(colored(
+                        "Enter path to directory containing FASTQs: ",
+                        "white"
+                    ))
+                    if not os.path.isdir(fastq_dir):
+                        logger.error(f"Directory not found: {fastq_dir}")
+                braker_cache["fastq_dir"] = fastq_dir
+            braker_args.append(f"--rnaseq_sets_ids={sra_ids}")
+            braker_args.append(f"--rnaseq_sets_dirs={os.path.abspath(fastq_dir)}")
+
+        elif rna_choice == "3":
+            if "bam_files" in braker_cache:
+                bam_files = braker_cache["bam_files"]
+                print(colored(f"[Using cached BAM files: {bam_files}]", "yellow"))
+            else:
+                bam_files_str = input(colored(
+                    "Enter FULL paths to BAM files (comma-separated): ",
+                    "white"
+                ))
+                bam_files = [os.path.abspath(f.strip()) for f in bam_files_str.split(',')]
+                for f in bam_files:
+                    if not os.path.exists(f):
+                        logger.error(f"BAM file not found: {f}")
+                        sys.exit(1)
+                braker_cache["bam_files"] = bam_files
+            braker_args.append(f"--bam={','.join(bam_files)}")
+
+    # --- AUTO-SETUP: Augustus Config ---
+    augustus_cfg = os.path.join(os.getcwd(), "augustus_config")
+    if not os.path.exists(augustus_cfg) or not os.listdir(augustus_cfg):
+        logger.info("Bootstrapping writable Augustus configuration for the first time...")
+        os.makedirs(augustus_cfg, exist_ok=True)
+        subprocess.run(
+            f"docker run --rm -u {os.getuid()}:{os.getgid()} -v \"{augustus_cfg}\":/out "
+            f"{DOCKER_IMAGE}:{DOCKER_TAG} bash -c 'cp -r /usr/share/augustus/config/* /out/'",
+            shell=True, check=True
+        )
+
+    # --- AUTO-SETUP: GeneMark Key ---
     gm_key_env = os.environ.get("BRAKER_GM_KEY", "").strip()
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    project_gm_key = os.path.join(project_root, ".braker_keys", "gm_key")
-    home_gm_key = os.path.expanduser("~/.braker_keys/gm_key")
-
     if gm_key_env and os.path.isfile(gm_key_env):
         gm_key_host = gm_key_env
-    elif os.path.isfile(project_gm_key):
-        gm_key_host = project_gm_key
-    elif os.path.isfile(home_gm_key):
-        gm_key_host = home_gm_key
     else:
+        gm_key_host = os.path.join(os.getcwd(), "gm_key")
+
+    if not os.path.isfile(gm_key_host):
         logger.error(
-            "FATAL: GeneMark-ETP license key (gm_key) not found.\n"
-            f"  Checked:\n"
-            f"    BRAKER_GM_KEY={gm_key_env or '<not set>'}\n"
-            f"    project-local: {project_gm_key}\n"
-            f"    home fallback: {home_gm_key}\n"
-            "  Please run the setup script again or set BRAKER_GM_KEY explicitly."
+            "FATAL: 'gm_key' not found!\n"
+            "Please place your GeneMark-ETP key directly in this folder "
+            f"({os.getcwd()}) named exactly 'gm_key'."
         )
         sys.exit(1)
 
@@ -1191,63 +1211,109 @@ def run_braker_for_accession(accession, config, assembly_dir, braker_output_dir,
     )
 
 
-def run_busco(accessions, config, assembly_dir, prokka_dir, braker_dir,
-              busco_dir, logger):
-    logger.info(colored(
-        "[Step 7/7] Running BUSCO for annotation quality assessment...",
-        "green"
-    ))
+def run_busco(accessions, config, assembly_dir, prokka_dir, braker_dir, busco_dir, logger):
+    logger.info(colored("[Step 7/8] Running BUSCO for annotation quality assessment...", "green"))
     os.makedirs(busco_dir, exist_ok=True)
     lineage = config['busco_lineage']
     busco_params = config.get('busco_params', {})
     org_type = config['organism_type']
 
     for accession in accessions:
+        output_prefix = os.path.join(busco_dir, accession)
+        
+        existing_summaries = glob.glob(os.path.join(output_prefix, f"short_summary.specific.{lineage}.*.txt"))
+        if existing_summaries:
+            logger.info(f"BUSCO output for {accession} already exists. Skipping.")
+            continue
+        if os.path.exists(output_prefix):
+            logger.info(f"Incomplete BUSCO output for {accession}. Cleaning up {output_prefix}.")
+            shutil.rmtree(output_prefix)
+            
         if org_type == 'PK':
             input_file = os.path.join(prokka_dir, accession, f"{accession}.faa")
         else:
             input_file = os.path.join(braker_dir, accession, "braker.aa")
 
         if not os.path.exists(input_file):
-            logger.warning(
-                f"No input file for BUSCO at {input_file}. Skipping {accession}."
-            )
+            logger.warning(f"No input file for BUSCO at {input_file}. Skipping {accession}.")
             continue
 
-        output_prefix = os.path.join(busco_dir, accession)
-
         busco_cmd = (
-            f"busco -i {input_file} -o {output_prefix} -m protein "
+            f"busco -i {input_file} -o {accession} --out_path {busco_dir} -m protein "
             f"-l {lineage} {format_params(busco_params)} "
             f"--cpu {config.get('quast_threads', 1)} --force"
         )
-        run_command_logged(
-            busco_cmd,
-            logger,
-            error_message=f"BUSCO failed for {accession}"
-        )
+        run_command_logged(busco_cmd, logger, error_message=f"BUSCO failed for {accession}")
 
-        summary_file = glob.glob(
-            os.path.join(
-                busco_dir,
-                accession,
-                f"short_summary.specific.{lineage}.*.txt"
-            )
-        )
+        summary_file = glob.glob(os.path.join(output_prefix, f"short_summary.specific.{lineage}.*.txt"))
         if summary_file:
             with open(summary_file[0], 'r') as f:
                 logger.info(f"BUSCO summary for {accession}:\n{f.read().strip()}")
         else:
-            logger.warning(
-                f"No BUSCO summary file generated for {accession}."
-            )
+            logger.warning(f"No BUSCO summary file generated for {accession}.")
 
+
+def run_eggnog_mapper(accessions, config, prokka_dir, braker_dir, func_dir, logger, run_flag):
+    if not run_flag:
+        logger.info(colored("[Step 8/8] Functional Annotation skipped. (Use --run-func to enable)", "yellow"))
+        return
+
+    logger.info(colored("[Step 8/8] Running Functional Annotation (Dockerized EggNOG-mapper)...", "green"))
+    os.makedirs(func_dir, exist_ok=True)
+    
+    org_type = config['organism_type']
+    threads = config.get('quast_threads', 8)
+    
+    # Because we mapped $PWD:$PWD, os.getcwd() inside AquaG exactly matches the Host's path!
+    host_db_dir = os.path.join(os.getcwd(), "eggnog_db")
+    
+    if not os.path.exists(host_db_dir) or not os.listdir(host_db_dir):
+        logger.warning(colored(f"⚠️ EggNOG database not found at {host_db_dir}. Skipping Functional Annotation.", "yellow"))
+        logger.info("To use this step, download the DB to a folder named 'eggnog_db' in your current directory.")
+        return
+
+    for accession in accessions:
+        # 1. Locate the correct protein file based on organism type
+        if org_type == 'PK':
+            input_file = os.path.join(prokka_dir, accession, f"{accession}.faa")
+        else: # EK
+            input_file = os.path.join(braker_dir, accession, "braker.aa")
+
+        if not os.path.exists(input_file):
+            logger.warning(f"No protein input file found at {input_file}. Skipping {accession}.")
+            continue
+
+        output_prefix = os.path.join(func_dir, accession)
+        
+        # 2. Checkpoint Logic
+        expected_out = f"{output_prefix}.emapper.annotations"
+        if os.path.exists(expected_out) and os.path.getsize(expected_out) > 0:
+            logger.info(f"Functional annotation for {accession} already exists. Skipping.")
+            continue
+            
+        # Clean up partial runs
+        for partial in glob.glob(f"{output_prefix}.emapper.*"):
+            os.remove(partial)
+
+        # 3. Execute the Official EggNOG-mapper Docker Container
+        emapper_cmd = (
+            f"docker run --rm "
+            f"-u {os.getuid()}:{os.getgid()} "
+            f"-v \"{os.getcwd()}\":\"{os.getcwd()}\" "
+            f"-w \"{os.getcwd()}\" "
+            f"-v \"{host_db_dir}\":/eggnog_db "
+            f"quay.io/biocontainers/eggnog-mapper:2.1.12--pyhdfd78af_2 emapper.py "
+            f"-i \"{input_file}\" --output \"{accession}\" --output_dir \"{func_dir}\" "
+            f"--cpu {threads} --data_dir /eggnog_db --itype proteins"
+        )
+        
+        run_command_logged(emapper_cmd, logger, error_message=f"EggNOG-mapper Docker run failed for {accession}")
 
 # ==============================
 # WORKFLOW FUNCTIONS
 # ==============================
 
-def get_species_for_kingdom(kingdom, num_species, filter_india, logger):
+def get_species_for_kingdom(kingdom, num_species, filter_region, config, logger):
     logger.info(
         f"Searching for {num_species} species in kingdom '{kingdom}' with required assemblies..."
     )
@@ -1290,10 +1356,11 @@ def get_species_for_kingdom(kingdom, num_species, filter_india, logger):
             if df.empty:
                 continue
 
-            if filter_india:
-                if not filter_for_india(df, logger).empty:
+            if filter_region:
+                regional_keywords = config.get('regional_keywords', [])
+                if not filter_by_region(df, logger, regional_keywords).empty:
                     logger.info(colored(
-                        f"Found species with Indian assemblies: {species_name}",
+                        f"Found species with regional assemblies: {species_name}",
                         "cyan"
                     ))
                     species_to_process.append(species_name)
@@ -1314,8 +1381,8 @@ def get_species_for_kingdom(kingdom, num_species, filter_india, logger):
 
 
 def process_species(species_name, config, base_output_dir,
-                    num_assemblies_per_species, filter_india,
-                    is_species_mode, logger):
+                    num_assemblies_per_species, filter_region,
+                    is_species_mode, logger, run_func):
     species_slug = species_name.replace(" ", "_").replace("/", "_")
     species_output_dir = os.path.join(base_output_dir, species_slug)
     os.makedirs(species_output_dir, exist_ok=True)
@@ -1332,86 +1399,88 @@ def process_species(species_name, config, base_output_dir,
         "prokka": os.path.join(species_output_dir, "prokka_output"),
         "braker": os.path.join(species_output_dir, "braker_output"),
         "busco": os.path.join(species_output_dir, "busco_output"),
+        "func": os.path.join(species_output_dir, "functional_annotation"),
     }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
 
-    logger.info(colored("[Step 1/7] Finding and downloading reference data...", "green"))
-    fasta_url, gff_url, protein_url = fetch_reference_urls(species_name, logger)
-    if not fasta_url or not gff_url:
-        logger.error(
-            f"Skipping species {species_name}: Could not find a suitable reference genome."
-        )
-        return False
+    # ==========================================
+    # 1. OFFLINE CACHE: REFERENCE DATA
+    # ==========================================
+    existing_fna = glob.glob(os.path.join(dirs["ref"], "*.fna"))
+    existing_gff = glob.glob(os.path.join(dirs["ref"], "*.gff"))
+    existing_faa = glob.glob(os.path.join(dirs["ref"], "*.faa"))
 
-    ref_genome = download_file_and_unzip(fasta_url, dirs["ref"], logger)
-    gff_genome = download_file_and_unzip(gff_url, dirs["ref"], logger)
-    if not ref_genome or not gff_genome:
-        logger.error(
-            f"Skipping species {species_name}: Failed to download reference data."
-        )
-        return False
-
-    protein_evidence_path = None
-    if config['organism_type'] == 'EK':
-        protein_evidence_path = download_file_and_unzip(
-            protein_url,
-            dirs["ref"],
-            logger
-        )
-        if not protein_evidence_path:
-            logger.warning(
-                "Could not auto-download protein evidence. BRAKER may fall back to config file."
-            )
-
-    logger.info(colored("[Step 2/7] Preparing list of assemblies...", "green"))
-    df = fetch_assembly_data(f'"{species_name}"[Organism]', logger)
-    if df.empty:
-        logger.warning(f"No other assemblies found for {species_name}.")
-        return True
-
-    if filter_india:
-        filtered_df = filter_for_india(df, logger)
-        if filtered_df.empty:
-            if is_species_mode:
-                logger.error(
-                    f"FATAL: No Indian-submitted assemblies found for '{species_name}'. Halting."
-                )
-                sys.exit(1)
-            else:
-                logger.warning(
-                    f"No Indian assemblies for {species_name}. Skipping this species."
-                )
-                return False
+    if existing_fna and existing_gff:
+        logger.info(colored("[Step 1/8] Reference data found locally. Skipping NCBI search.", "green"))
+        ref_genome = existing_fna[0]
+        gff_genome = existing_gff[0]
+        protein_evidence_path = existing_faa[0] if config['organism_type'] == 'EK' and existing_faa else None
     else:
-        filtered_df = df.copy()
+        logger.info(colored("[Step 1/8] Finding and downloading reference data...", "green"))
+        fasta_url, gff_url, protein_url = fetch_reference_urls(species_name, logger)
+        if not fasta_url or not gff_url:
+            logger.error(f"Skipping species {species_name}: Could not find a suitable reference genome.")
+            return False
 
-    filtered_df.loc[:, 'TotalLength'] = pd.to_numeric(
-        filtered_df['TotalLength'],
-        errors='coerce'
-    )
+        ref_genome = download_file_and_unzip(fasta_url, dirs["ref"], logger)
+        gff_genome = download_file_and_unzip(gff_url, dirs["ref"], logger)
+        if not ref_genome or not gff_genome:
+            logger.error(f"Skipping species {species_name}: Failed to download reference data.")
+            return False
 
-    min_genome_size = 100000
-    initial_count = len(filtered_df)
-    filtered_df = filtered_df[filtered_df['TotalLength'] >= min_genome_size].copy()
-    logger.info(
-        f"Filtered out {initial_count - len(filtered_df)} assemblies smaller than "
-        f"{min_genome_size} bp."
-    )
-    if filtered_df.empty:
-        logger.warning(
-            f"No assemblies remained for {species_name} after size filtering. Skipping."
-        )
-        return False
+        protein_evidence_path = None
+        if config['organism_type'] == 'EK':
+            protein_evidence_path = download_file_and_unzip(protein_url, dirs["ref"], logger)
 
-    metadata_path = os.path.join(
-        species_output_dir,
-        f"{species_slug}_metadata.tsv"
-    )
-    filtered_df.to_csv(metadata_path, sep='\t', index=False)
-    logger.info(f"Assembly metadata saved to {metadata_path}")
+    # ==========================================
+    # 2. OFFLINE CACHE: ASSEMBLY METADATA
+    # ==========================================
+    logger.info(colored("[Step 2/8] Preparing list of assemblies...", "green"))
+    metadata_path = os.path.join(species_output_dir, f"{species_slug}_metadata.tsv")
+    
+    if os.path.exists(metadata_path):
+        logger.info(f"Loading cached assembly metadata from {metadata_path} (Offline Mode)")
+        filtered_df = pd.read_csv(metadata_path, sep='\t')
+        if filtered_df.empty:
+             logger.warning(f"Cached metadata for {species_name} is empty. Skipping.")
+             return False
+    else:
+        df = fetch_assembly_data(f'"{species_name}"[Organism]', logger)
+        if df.empty:
+            logger.warning(f"No other assemblies found for {species_name}.")
+            return True
 
-    logger.info(colored("[Step 3/7] Downloading assemblies...", "green"))
+        if filter_region:
+            regional_keywords = config.get('regional_keywords', [])
+            filtered_df = filter_by_region(df, logger, regional_keywords)
+            if filtered_df.empty:
+                if is_species_mode:
+                    logger.error(f"FATAL: No regional-submitted assemblies found for '{species_name}'. Halting.")
+                    sys.exit(1)
+                else:
+                    logger.warning(f"No regional assemblies for {species_name}. Skipping this species.")
+                    return False
+        else:
+            filtered_df = df.copy()
+
+        filtered_df.loc[:, 'TotalLength'] = pd.to_numeric(filtered_df['TotalLength'], errors='coerce')
+        min_genome_size = 1
+        initial_count = len(filtered_df)
+        filtered_df = filtered_df[filtered_df['TotalLength'] >= min_genome_size].copy()
+        logger.info(f"Filtered out {initial_count - len(filtered_df)} assemblies smaller than {min_genome_size} bp.")
+        
+        if filtered_df.empty:
+            logger.warning(f"No assemblies remained for {species_name} after size filtering. Skipping.")
+            return False
+
+        filtered_df.to_csv(metadata_path, sep='\t', index=False)
+        logger.info(f"Assembly metadata saved to {metadata_path}")
+
+    # ==========================================
+    # RESUME PIPELINE
+    # ==========================================
+    logger.info(colored("[Step 3/8] Downloading assemblies...", "green"))
     accessions = download_assemblies(
         filtered_df,
         dirs["asm"],
@@ -1422,12 +1491,12 @@ def process_species(species_name, config, base_output_dir,
     if not accessions:
         return True
 
-    logger.info(colored("[Step 4/7] Finalizing assembly files...", "green"))
+    logger.info(colored("[Step 4/8] Finalizing assembly files...", "green"))
     decompress_and_rename_assemblies(dirs["asm"], accessions, logger)
 
     fix_fasta_headers(dirs["asm"], accessions, logger)
 
-    logger.info(colored("[Step 5/7] Running QUAST...", "green"))
+    logger.info(colored("[Step 5/8] Running QUAST...", "green"))
     run_quast(
         accessions,
         dirs["asm"],
@@ -1441,9 +1510,10 @@ def process_species(species_name, config, base_output_dir,
 
     if config['organism_type'] == 'EK':
         logger.info(colored(
-            "[Step 6/7] Running Eukaryotic Annotation (BRAKER3)...",
+            "[Step 6/8] Running Eukaryotic Annotation (BRAKER3)...",
             "green"
         ))
+        braker_cache = {}  # <--- IN-MEMORY CACHE FOR BRAKER PROMPTS
         for accession in accessions:
             run_braker_for_accession(
                 accession,
@@ -1451,11 +1521,12 @@ def process_species(species_name, config, base_output_dir,
                 dirs["asm"],
                 dirs["braker"],
                 protein_evidence_path,
-                logger
+                logger,
+                braker_cache
             )
     else:
         logger.info(colored(
-            "[Step 6/7] Running Prokaryotic Annotation (Prokka)...",
+            "[Step 6/8] Running Prokaryotic Annotation (Prokka)...",
             "green"
         ))
         run_prokka(
@@ -1467,7 +1538,7 @@ def process_species(species_name, config, base_output_dir,
             logger
         )
 
-    logger.info(colored("[Step 7/7] Running BUSCO...", "green"))
+    logger.info(colored("[Step 7/8] Running BUSCO...", "green"))
     run_busco(
         accessions,
         config,
@@ -1476,6 +1547,16 @@ def process_species(species_name, config, base_output_dir,
         dirs["braker"],
         dirs["busco"],
         logger
+    )
+
+    run_eggnog_mapper(
+        accessions,
+        config,
+        dirs["prokka"],
+        dirs["braker"],
+        dirs["func"],
+        logger,
+        run_func
     )
 
     logger.info(colored(
@@ -1535,7 +1616,7 @@ def main():
     filter_group.add_argument(
         "--num-assemblies",
         type=int,
-        default=1,
+        default=None,
         help="Max number of assemblies to process PER SPECIES. Default: 1"
     )
     filter_group.add_argument(
@@ -1544,12 +1625,18 @@ def main():
         default=1,
         help="In KINGDOM mode, the number of species to process. Default: 1"
     )
+    filter_group.add_argument(
+        "--run-func",
+        action='store_true',
+        help="Run EggNOG-mapper functional annotation (requires local eggnog_db folder)."
+    )
 
     location_exclusive_group = filter_group.add_mutually_exclusive_group()
     location_exclusive_group.add_argument(
-        "-I", "--india-only",
+        "-R", "--region-only", "-I", "--india-only",
         action='store_true',
-        help="Process assemblies from Indian submitters only."
+        dest='region_only',
+        help="Process assemblies matching regional keywords specified in the config file."
     )
     location_exclusive_group.add_argument(
         "-a", "--any-source",
@@ -1566,29 +1653,25 @@ def main():
 
     error_count = 0
 
-    # -----------------------------
-    # SPECIES MODE
-    # -----------------------------
     if args.species:
         if not process_species(
             args.species,
             config,
             args.output_dir,
             args.num_assemblies,
-            args.india_only,
+            args.region_only,
             is_species_mode=True,
-            logger=logger
+            logger=logger,
+            run_func=args.run_func
         ):
             error_count += 1
 
-    # -----------------------------
-    # KINGDOM MODE
-    # -----------------------------
     elif args.kingdom:
         species_to_process = get_species_for_kingdom(
             args.kingdom,
             args.num_species,
-            args.india_only,
+            args.region_only,
+            config,
             logger
         )
         for species_name in species_to_process:
@@ -1598,9 +1681,10 @@ def main():
                     config,
                     args.output_dir,
                     args.num_assemblies,
-                    args.india_only,
+                    args.region_only,
                     is_species_mode=False,
-                    logger=logger
+                    logger=logger,
+                    run_func=args.run_func
                 ):
                     error_count += 1
             except Exception as e:
@@ -1611,9 +1695,6 @@ def main():
                 error_count += 1
                 continue
 
-    # -----------------------------
-    # ASSEMBLY FILE MODE (accession list)
-    # -----------------------------
     elif args.assembly_file:
         if 'organism' not in config or not config.get('organism'):
             logger.error(
@@ -1635,6 +1716,7 @@ def main():
             "prokka": os.path.join(args.output_dir, "prokka_output"),
             "braker": os.path.join(args.output_dir, "braker_output"),
             "busco": os.path.join(args.output_dir, "busco_output"),
+            "func": os.path.join(args.output_dir, "functional_annotation"),
         }
         for d in dirs.values():
             os.makedirs(d, exist_ok=True)
@@ -1689,7 +1771,6 @@ def main():
                         f"for organism '{reference_organism}'."
                     )
 
-            # No India filter here; just download the list
             downloaded_accessions = download_assemblies(
                 df,
                 dirs["asm"],
@@ -1717,6 +1798,7 @@ def main():
             )
 
             if config['organism_type'] == 'EK':
+                braker_cache = {}  # <--- IN-MEMORY CACHE FOR BRAKER PROMPTS
                 for accession in downloaded_accessions:
                     run_braker_for_accession(
                         accession,
@@ -1724,7 +1806,8 @@ def main():
                         dirs["asm"],
                         dirs["braker"],
                         protein_evidence_path,
-                        logger
+                        logger,
+                        braker_cache
                     )
             else:
                 run_prokka(
@@ -1746,13 +1829,20 @@ def main():
                 logger
             )
 
+            run_eggnog_mapper(
+                downloaded_accessions,
+                config,
+                dirs["prokka"],
+                dirs["braker"],
+                dirs["func"],
+                logger,
+                args.run_func
+            )
+
         except FileNotFoundError:
             logger.error(f"Assembly file not found: {args.assembly_file}")
             sys.exit(1)
 
-    # -----------------------------
-    # LOCAL ASSEMBLY DIRECTORY MODE
-    # -----------------------------
     elif args.assembly_dir:
         if 'organism' not in config or not config.get('organism'):
             logger.error(
@@ -1775,6 +1865,7 @@ def main():
             "prokka": os.path.join(args.output_dir, "prokka_output"),
             "braker": os.path.join(args.output_dir, "braker_output"),
             "busco": os.path.join(args.output_dir, "busco_output"),
+            "func": os.path.join(args.output_dir, "functional_annotation"),
         }
         for d in dirs.values():
             os.makedirs(d, exist_ok=True)
@@ -1847,7 +1938,10 @@ def main():
             root, ext = os.path.splitext(basename_no_gz)
             accession = root
             dest_fasta = os.path.join(dirs["asm"], f"{accession}.fna")
-
+            if os.path.exists(dest_fasta) and os.path.getsize(dest_fasta) > 0:
+                logger.info(f"Assembly {accession} already imported.")
+                accessions.append(accession)
+                continue
             if src.endswith(".gz"):
                 cmd = f"gunzip -c '{src}' > '{dest_fasta}'"
                 run_command_logged(
@@ -1867,7 +1961,6 @@ def main():
 
         fix_fasta_headers(dirs["asm"], accessions, logger)
 
-        logger.info(colored("[Step 5/7] Running QUAST...", "green"))
         run_quast(
             accessions,
             dirs["asm"],
@@ -1880,10 +1973,7 @@ def main():
         )
 
         if config['organism_type'] == 'EK':
-            logger.info(colored(
-                "[Step 6/7] Running Eukaryotic Annotation (BRAKER3)...",
-                "green"
-            ))
+            braker_cache = {}  # <--- IN-MEMORY CACHE FOR BRAKER PROMPTS
             for accession in accessions:
                 run_braker_for_accession(
                     accession,
@@ -1891,13 +1981,10 @@ def main():
                     dirs["asm"],
                     dirs["braker"],
                     protein_evidence_path,
-                    logger
+                    logger,
+                    braker_cache
                 )
         else:
-            logger.info(colored(
-                "[Step 6/7] Running Prokaryotic Annotation (Prokka)...",
-                "green"
-            ))
             run_prokka(
                 accessions,
                 dirs["asm"],
@@ -1907,7 +1994,6 @@ def main():
                 logger
             )
 
-        logger.info(colored("[Step 7/7] Running BUSCO...", "green"))
         run_busco(
             accessions,
             config,
@@ -1918,9 +2004,29 @@ def main():
             logger
         )
 
+        # --- EGGNOG-MAPPER CALL FOR LOCAL ASSEMBLY DIR MODE ---
+        run_eggnog_mapper(
+            accessions,
+            config,
+            dirs["prokka"],
+            dirs["braker"],
+            dirs["func"],
+            logger,
+            args.run_func
+        )
+        # ------------------------------------------------------
+
     # -----------------------------
     # FINAL REPORT
     # -----------------------------
+    # --- Trigger Visualization Script ---
+    logger.info(colored("\n[Step 9] Generating Interactive Dashboards...", "cyan"))
+    dashboard_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generate_dashboard.py")
+    if os.path.exists(dashboard_script):
+        subprocess.run([sys.executable, dashboard_script, "-d", args.output_dir])
+    else:
+        logger.warning(f"Could not find {dashboard_script} to generate reports.")
+    # ------------------------------------
     if error_count > 0:
         logger.info(colored(
             f"\nPIPELINE COMPLETED WITH {error_count} ERRORS OR SKIPPED SPECIES. "
@@ -1936,5 +2042,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
