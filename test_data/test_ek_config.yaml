@@ -1,0 +1,10 @@
+email: "test@example.com"
+organism: "Encephalitozoon cuniculi"
+organism_type: "EK"
+quast_threads: 4
+busco_lineage: "fungi_odb10"
+busco_params:
+  cpu: 4
+braker_params:
+  cpus: 4
+  fungus: true
